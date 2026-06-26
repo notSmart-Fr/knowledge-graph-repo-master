@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowSyntheticDefaultImports": true,
+    "jsx": "preserve",
+    "baseUrl": ".",
+    "paths": {
+      "@dtc/ai-core": ["packages/ai-core/src/index.ts"]
+    },
+    "lib": ["ESNext", "DOM"]
+  },
+  "references": [
+    {
+      "path": "./packages/ai-core"
+    }
+  ]
+}

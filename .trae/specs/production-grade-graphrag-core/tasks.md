@@ -279,22 +279,120 @@
   - [ ] Wire interruption handling (cancel TTS on new speech)
   - [ ] Wire call lifecycle hooks (start → transcribe → end → summarize)
 
-## Task 12: AST Firewall — Final Verification
-- [ ] Task 12.1: Update firewall scan paths
+## Task 12: UI Dashboard — Read-Only Operator Workspace
+- [ ] Task 12.1: Scaffold Vite + Vanilla TS boilerplate (`apps/web/`)
+  - [ ] Run `bun create vite apps/web --template vanilla-ts`
+  - [ ] Install `motion` (Motion One) — only dependency beyond Vite defaults
+  - [ ] Add `tsconfig.json` with strict mode
+  - [ ] Add `vite.config.ts` — zero plugins needed
+  - [ ] Verify `bun dev` starts without errors
+- [ ] Task 12.2: Build EventTarget state store (`apps/web/src/store.ts`)
+  - [ ] `createStore<T>(initial)` returns `{ get, set, subscribe }` backed by `EventTarget`
+  - [ ] Typed events: `"state:change"` with `CustomEvent<Partial<T>>`
+  - [ ] Subscribe returns unsubscribe function
+  - [ ] No external dependencies — uses native `EventTarget` and `CustomEvent`
+- [ ] Task 12.3: Build CSS base + grid system (`apps/web/src/styles/`)
+  - [ ] `base.css` — `#000` background, Inter font (monospace variant for transcript), CSS custom properties for colors
+  - [ ] `grid.css` — 65/35 asymmetric CSS Grid with `@container` query for mobile collapse
+  - [ ] `card.css` — `.magnetic-card` base styles, `::before` radar glow, `transform-style: preserve-3d`
+  - [ ] Mobile: grid collapses to single column (transcript full width, sidebar below)
+- [ ] Task 12.4: Build magnetic card component (`apps/web/src/components/magnetic-card.ts`)
+  - [ ] `createMagneticCard(el)` — attaches mousemove/mouseleave listeners
+  - [ ] Motion One `animate()` for rotateX/rotateY tilt (±12 degrees)
+  - [ ] CSS custom properties `--cursor-x`, `--cursor-y` for radar glow tracking
+  - [ ] `matchMedia("(hover: hover)")` guard — disabled on touch
+  - [ ] `will-change: transform` during hover, removed on mouseleave
+- [ ] Task 12.5: Build transcript pane (`apps/web/src/components/transcript-pane.ts`)
+  - [ ] Connects to LiveKit room via WebSocket (client-side SDK or raw WS)
+  - [ ] Appends text frames to scroll container (auto-scroll on new frame)
+  - [ ] Speaker labels: left-aligned for customer (`#444` background), right-aligned for agent (`#111` background)
+  - [ ] Sentiment: `border-left: 3px solid` color — green for positive, `#333` for neutral, `#600` for negative
+  - [ ] Handles LiveKit disconnect: shows dimmed "transcript paused" state, auto-reconnects
+- [ ] Task 12.6: Build metrics sidebar (`apps/web/src/components/metrics-sidebar.ts`)
+  - [ ] Four magnetic cards (use `createMagneticCard`):
+    - Circuit Breaker Sentinel — polls `GET /ready` every 60s, shows state (green/amber/red dot), last transition time
+    - Cache Health — reads `crm.cache.hit_rate` from store, renders circular SVG percentage
+    - Active Call — reads `crm.calls.active` and contact data from store, shows duration timer
+    - Deals at Risk — reads stale deals count from store via Supabase Realtime, shows count + top deal name
+  - [ ] Cards stack vertically, equal height, scrollable if overflow
+- [ ] Task 12.7: Build contact context bar (`apps/web/src/components/contact-bar.ts`)
+  - [ ] Bottom-fixed, 80px height, 100% width
+  - [ ] During call: contact name, account, open deals count, last interaction date
+  - [ ] Outside call: system status (healthy/degraded/down) from last `/ready` poll
+  - [ ] Data from store (populated by Supabase Realtime subscription)
+- [ ] Task 12.8: Build Supabase Realtime subscription (`apps/web/src/main.ts`)
+  - [ ] Subscribe to `deals`, `contacts`, `calls` table changes via Supabase Realtime WebSocket
+  - [ ] Push updates to store → components re-render via subscription
+  - [ ] Handle disconnect/reconnect gracefully
+- [ ] Task 12.9: Wire `/ready` polling + OTel metrics polling
+  - [ ] Poll `GET http://localhost:8280/ready` every 60s
+  - [ ] Push circuit breaker states to store
+  - [ ] Poll OTel Prometheus endpoint every 10s for cache hit rate, active calls gauge
+  - [ ] Push to store
+- [ ] Task 12.10: Add `"dev:web"` and `"build:web"` scripts to package.json
+  - [ ] `"dev:web": "cd apps/web && bun dev"`
+  - [ ] `"build:web": "cd apps/web && bun run build"`
+  - [ ] Verify `bun dev:web` serves dashboard on localhost:5173
+
+## Task 13: Pre-Commit Validation Pipeline (SLA Gates)
+- [ ] Task 13.1: Build golden dataset (`scripts/golden-dataset.json`)
+  - [ ] 50 CRM conversation examples: 20 WhatsApp, 15 voice, 15 mixed intent
+  - [ ] Each example: `{ query, expectedResponse, expectedContext, expectedEntities }`
+  - [ ] Covers all CRM entity types: contacts, deals, tickets, pipeline, accounts
+- [ ] Task 13.2: Update `scripts/eval-rag.ts` with DeepEval integration
+  - [ ] Load golden dataset
+  - [ ] Run each example through `orchestrator.processIntent()`
+  - [ ] Compute Faithfulness, Answer Relevancy, Context Precision
+  - [ ] Gate: all three >= thresholds from spec Section 5.1
+  - [ ] Output: `scripts/eval-results.json`
+- [ ] Task 13.3: Build P95 latency gate (`scripts/validate-latency.ts`)
+  - [ ] Run 100 simulated requests against seed data (mix of WhatsApp and voice patterns)
+  - [ ] Compute P95 for: full pipeline (cold), cache hit path, graph expansion, embedding API
+  - [ ] Gate: all P95 thresholds from spec Section 5.2
+  - [ ] Output: `scripts/validate-latency.json`
+- [ ] Task 13.4: Build metric ceiling gate (`scripts/validate-metrics.ts`)
+  - [ ] Read current active metric series count from OTel meter provider
+  - [ ] Gate: active series < 2,000
+  - [ ] Gate: metric collection interval = 60s (not 10s)
+  - [ ] Gate: head-based sampling rate = 10% in production config
+  - [ ] Output: `scripts/validate-metrics.json`
+- [ ] Task 13.5: Build SLA gate runner (`scripts/validate-sla.ts`)
+  - [ ] Simulate load and measure: cache hit rate, idempotency hit rate, circuit breaker states, DLQ depth
+  - [ ] Gate: all SLA thresholds from spec Section 5.4
+  - [ ] Output: `scripts/validate-sla.json`
+- [ ] Task 13.6: Wire `pnpm run validate` script
+  - [ ] Runs: `eval-rag.ts` → `validate-latency.ts` → `validate-metrics.ts` → `validate-sla.ts`
+  - [ ] Aggregates results into `scripts/validate-results.json`
+  - [ ] Exit 1 if any gate fails
+  - [ ] Add `"validate": "bun run scripts/validate.ts"` to `package.json`
+- [ ] Task 13.7: Add telemetry budget gauges to `scripts/otel-bootstrap.ts`
+  - [ ] `crm.telemetry.metrics_active` gauge — current active metric series
+  - [ ] `crm.telemetry.traces_bytes` counter — monthly trace data volume estimate
+  - [ ] Both reported at 60s intervals (aligned with metric export interval)
+
+## Task 14: AST Firewall — Final Verification
+- [ ] Task 14.1: Update firewall scan paths
   - [ ] Add `packages/ai-core/src/features/**/*.ts` to scan targets
   - [ ] Add `packages/ai-core/src/adapters/**/*.ts` to scan targets
   - [ ] Add `packages/ai-core/src/agents/**/*.ts` to scan targets
   - [ ] Add `packages/ai-core/src/core/**/*.ts` to scan targets
-- [ ] Task 12.2: Run full sweep
+- [ ] Task 14.2: Run full sweep
   - [ ] `bun check` → 0 violations across all packages
   - [ ] `bun check:chaos` → 47 violations (chaos tests unchanged)
-- [ ] Task 12.3: Update `.knowledge/runbook.md`
+- [ ] Task 14.3: Update `.knowledge/runbook.md`
   - [ ] Document hexagonal architecture: ports, adapters, features, orchestration
   - [ ] Document graceful degradation paths and circuit breaker states
   - [ ] Document PII encryption key management
   - [ ] Document health endpoints: `/health`, `/ready` on port 8280
   - [ ] Document DLQ recovery procedures
   - [ ] Document RBAC roles and audit log queries
+  - [ ] Document UI dashboard: URL, data sources, component layout
+  
+## Task 15: UI Dashboard — Pre-Commit Validation
+- [ ] Task 15.1: Add UI-specific checks to `bun run validate`
+  - [ ] Bundle size check: `apps/web/dist/` total < 50 KB gzipped (Motion One is 3 KB, rest is vanilla TS + CSS)
+  - [ ] Accessibility check: all interactive elements keyboard-navigable, all text meets WCAG AA contrast (>= 4.5:1 on `#000`)
+  - [ ] No framework found in bundle: grep for `react`, `vue`, `angular`, `svelte` in dist — must return empty
 
 # Task Dependencies
 ```
@@ -322,7 +420,13 @@ Task 10 (Telemetry) ── depends on 5 (orchestrator), 2 (adapters)
   ↓
 Task 11 (Transport) ── depends on 5 (orchestrator), 7 (agents), 2.6 (idempotency/DLQ)
   ↓
-Task 12 (Firewall) ── depends on ALL above
+Task 12 (UI Dashboard) ── depends on 8 (health endpoints), 5 (orchestrator for data flow). 12.1-12.4 parallelizable.
+  ↓
+Task 13 (SLA Gates) ── depends on 7 (agents), 9 (seed data), 10 (telemetry). 13.1-13.5 parallelizable.
+  ↓
+Task 14 (Firewall) ── depends on ALL above
+  ↓
+Task 15 (UI Pre-Commit) ── depends on 12 (UI built), 13 (validate script exists)
 ```
 
 # Parallelizable
@@ -333,3 +437,6 @@ Task 12 (Firewall) ── depends on ALL above
 - Task 7.1–7.4 (agents) can run in parallel
 - Task 8.1, 8.2, 8.3 can run in parallel
 - Task 10.1 and 10.3 can run in parallel with 10.2
+- Task 12.1–12.4 (UI scaffold + components) can run in parallel — independent files
+- Task 12.5–12.9 (UI data connections) can run in parallel after 12.4
+- Task 13.1–13.5 and 13.7 can run in parallel

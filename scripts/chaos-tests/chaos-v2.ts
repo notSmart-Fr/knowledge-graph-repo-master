@@ -1,6 +1,6 @@
 // @ts-nocheck
 //
-// Chaos Test Suite — Firewall v2
+// Chaos Test Suite — Firewall v3
 // Each section intentionally violates ONE rule. The firewall MUST flag every block.
 // Run: bun scripts/ast-firewall.ts --chaos
 
@@ -17,6 +17,8 @@ declare const createTool: any;
 declare const streamText: any;
 declare const generateText: any;
 declare const fetch: any;
+declare const createCipheriv: any; // Stub for Rule19
+declare const logger: { info: any; warn: any; error: any; debug: any }; // Stub for patched Rule5
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RULE 1: Schema Constraints — unconstrained z.string() and z.number()
@@ -249,3 +251,76 @@ const okVar: unknown = {};
 function okParam(x: unknown) { return x; }
 const okArr: Array<unknown> = [];
 function okReturn(): unknown { return {}; }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PATCHED RULE5: Data Error PII — no PII in logger.* calls either!
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function piiInLogger() {
+  const phone = "+1234567890";
+  const email = "user@example.com";
+
+  // All of these are VIOLATIONS (we only checked console.error before)
+  logger.info(phone);
+  logger.warn(email);
+  logger.debug("Transcript: " + phone);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PATCHED RULE13: Span PII Guard — no PII in span.addEvent() attributes either!
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function leakySpanEvents() {
+  await tracer.startActiveSpan("process", async (span: any) => {
+    span.addEvent("data_received", {
+      phone: "+1234",        // VIOLATION (new rule coverage)
+      transcript: "raw",     // VIOLATION (new rule coverage)
+      message: "text",       // VIOLATION (new rule coverage)
+      request_id: "abc"      // OK
+    });
+    span.end();
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PATCHED RULE15: No Any — no "as any" type assertions either!
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function asAnyViolation(x: unknown) {
+  const y = x as any;  // VIOLATION (new rule coverage!)
+  return y;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NEW RULE18: WebSocket Boundary — realtime .on() handlers must Zod.parse() payload
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function realtimeNoZod() {
+  // Supabase realtime subscription handler without Zod parsing payload
+  const channel = supabase.channel("deals").on("INSERT", (payload) => {
+    console.log(payload); // VIOLATION (Rule18): access payload without Zod.parse()
+  });
+}
+
+export function realtimeSafe() {
+  const channel = supabase.channel("deals").on("INSERT", (payload) => {
+    // OK: Zod parses payload!
+    const safePayload = z.object({ id: z.string(), title: z.string() }).parse(payload); 
+    console.log(safePayload);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NEW RULE19: Crypto Algorithm — createCipheriv must use "aes-256-gcm"
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function weakCrypto() {
+  const key = Buffer.alloc(32); const iv = Buffer.alloc(12);
+  createCipheriv("aes-128-cbc", key, iv);  // VIOLATION (Rule19): weak algorithm
+  createCipheriv("aes-256-cbc", key, iv);  // VIOLATION (Rule19): use gcm mode
+}
+
+export function strongCrypto() {
+  const key = Buffer.alloc(32); const iv = Buffer.alloc(12);
+  createCipheriv("aes-256-gcm", key, iv); // OK
+}

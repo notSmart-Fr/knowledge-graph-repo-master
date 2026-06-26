@@ -1,0 +1,12 @@
+{
+  "name": "@dtc/ai-core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}

@@ -69,3 +69,16 @@ RedisIdempotencyStore (SET NX EX)
 ```
 
 **TTL:** 300 seconds (5 minutes)
+
+## Circuit Breaker Telemetry
+- **Metric:** `crm.circuit_breaker.state` (OTel gauge per-adapter)
+  - `0` = closed, `1` = half‑open, `2` = open
+- **Exposed via:** `/ready` endpoint (deployment-health skill), and Grafana dashboard
+- **Labels:** adapter name (e.g., `adapter: neo4j`, `adapter: gemini`)
+
+## Links to SLA Gates
+These operational SLA gates (defined in sla-gates skill) monitor degradation:
+- **Cache hit rate ≥ 30 %** → otherwise embeddings too dissimilar
+- **No circuit breaker open > 60 s** → otherwise fallback is running non-stop
+- **AI generation failure rate < 5 %** → otherwise DeepSeek fallback is overloaded
+- **DLQ depth < 50 items/queue** → otherwise systematic failure

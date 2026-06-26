@@ -1,11 +1,14 @@
-import fs from "node:fs";
-import path from "node:path";
+// scripts/load-env.ts
+// Loads .env from repo root for any script that needs env vars.
+import { join } from "node:path";
 
 function applyEnvFile(filePath: string) {
-  if (!fs.existsSync(filePath)) return;
+  const file = Bun.file(filePath);
+  
+  if (!file.exists()) return;
 
-  const envConfig = fs.readFileSync(filePath, "utf8");
-  for (const line of envConfig.split(/\r?\n/)) {
+  const text = file.text();
+  for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
 
@@ -26,10 +29,8 @@ function applyEnvFile(filePath: string) {
   }
 }
 
-/** Loads apps/backend, apps/storefront, then scripts/.env (later files do not override shell exports). */
+/** Loads root .env only (no legacy app .env files). */
 export function loadMonorepoEnv() {
-  const root = process.cwd();
-  applyEnvFile(path.join(root, "apps/backend/.env"));
-  applyEnvFile(path.join(root, "apps/storefront/.env"));
-  applyEnvFile(path.join(root, "scripts/.env"));
+  const root = join(import.meta.dir, "..");
+  applyEnvFile(join(root, ".env"));
 }

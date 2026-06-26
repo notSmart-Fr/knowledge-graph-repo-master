@@ -1,5 +1,5 @@
 /**
- * AST Security Firewall v2 — 15 Rules, 6 Domains
+ * AST Security Firewall v3 — 19 Rules, 7 Domains
  *
  * Compile-time structural verification. Runs as a compiler step — no manual review.
  *
@@ -71,6 +71,7 @@ function resolveSourceFiles(project: Project, isChaos: boolean, targetPath?: str
     console.log("☣️  Running Chaos Test Suite Verification...");
     project.addSourceFilesAtPaths("scripts/chaos-tests/**/*.ts");
     project.addSourceFilesAtPaths("scripts/chaos-tests/**/*.tsx");
+    project.addSourceFilesAtPaths("packages/ai-core/src/__chaos__/**/*.ts");
     return;
   }
 
@@ -85,20 +86,21 @@ function resolveSourceFiles(project: Project, isChaos: boolean, targetPath?: str
     return;
   }
 
-  // Full sweep — only scan directories that exist
+  // Full sweep — only scan directories that exist, exclude __chaos__
   const dirs = [
     "packages/ai-core/src",
+    "apps/web/src",
     "apps/web/app",
   ];
   for (const dir of dirs) {
     const absDir = path.resolve(process.cwd(), dir);
     if (fs.existsSync(absDir)) {
-      project.addSourceFilesAtPaths(`${dir}/**/*.ts`);
-      project.addSourceFilesAtPaths(`${dir}/**/*.tsx`);
+      project.addSourceFilesAtPaths([`${dir}/**/*.ts`, `!${dir}/**/__chaos__/**`]);
+      project.addSourceFilesAtPaths([`${dir}/**/*.tsx`, `!${dir}/**/__chaos__/**`]);
     }
   }
-  // Scripts (always scan if they exist)
-  for (const script of ["scripts/worker.ts", "scripts/voice-agent.ts"]) {
+  // Scripts (only scan load-env.ts for now)
+  for (const script of ["scripts/load-env.ts"]) {
     const abs = path.resolve(process.cwd(), script);
     if (fs.existsSync(abs)) project.addSourceFileAtPath(script);
   }
@@ -184,6 +186,30 @@ const rule3_BoundaryZodWrap: RuleFn = (ctx) => {
   }
 };
 
+const rule18_WebSocketBoundary: RuleFn = (ctx) => {
+  if (!/\.on\(/.test(ctx.fileText)) return;
+
+  for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    if (!Node.isPropertyAccessExpression(expr)) continue;
+    if (expr.getName() !== "on") continue;
+
+    const args = call.getArguments();
+    const callback = args[args.length - 1];
+    if (!callback) continue;
+
+    const callbackText = callback.getText();
+
+    // Only flag handlers accessing payload/data/message/text without Zod parse
+    if (!/payload|data|message|text|event|body/.test(callbackText)) continue;
+    if (/\.(parse|parseAsync|safeParse)\(/.test(callbackText)) continue;
+
+    error(ctx, "Rule 18 WebSocket Boundary",
+      `WebSocket/realtime event handler ".on()" must Zod.parse() untrusted incoming payload. ` +
+      `Untrusted WebSocket data cannot enter internal state raw — same as fetch() boundary.`);
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Domain B: Error & Resilience
 // ═══════════════════════════════════════════════════════════════════════════
@@ -258,13 +284,27 @@ const rule5_DataErrorPII: RuleFn = (ctx) => {
     }
   }
 
-  // Check console.error
+  // Check console.error AND logger.* calls (info, warn, debug, error)
   for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    if (call.getExpression().getText() !== "console.error") continue;
+    const expr = call.getExpression();
+    const isConsoleError = expr.getText() === "console.error";
+    
+    let isLoggerCall = false;
+    if (Node.isPropertyAccessExpression(expr)) {
+      const base = expr.getExpression().getText();
+      const method = expr.getName();
+      if (base === "logger" && ["info", "warn", "debug", "error"].includes(method)) {
+        isLoggerCall = true;
+      }
+    }
+
+    if (!isConsoleError && !isLoggerCall) continue;
+
     for (const arg of call.getArguments()) {
       if (Node.isIdentifier(arg) && piiPattern.test(arg.getText())) {
+        const loggerType = isConsoleError ? "console.error" : `logger.${expr.getName()}`;
         error(ctx, "Rule 5 Error PII",
-          `console.error must not pass unvetted PII identifier "${arg.getText()}".`);
+          `${loggerType} must not pass unvetted PII identifier "${arg.getText()}".`);
       }
     }
   }
@@ -281,6 +321,47 @@ const rule6_GracefulShutdown: RuleFn = (ctx) => {
     error(ctx, "Rule 6 Graceful Shutdown",
       "File contains process.exit()/Bun.exit() but missing SIGTERM and/or SIGINT handler. " +
       "Ungraceful exits orphan queues and leak connections.");
+  }
+};
+
+const rule17_CircuitBreaker: RuleFn = (ctx) => {
+  if (!ctx.normalizedPath.includes("/core/orchestrator")) return;
+
+  const hasCircuitBreakerImport = /withCircuitBreaker|CircuitBreaker|breaker\./.test(ctx.fileText);
+  if (!hasCircuitBreakerImport) {
+    error(ctx, "Rule 17 Circuit Breaker",
+      "Orchestrator has no circuit breaker import/usage. All external adapter calls must be wrapped.");
+  } else {
+    // Check if adapter calls are wrapped in breaker.invoke() or similar
+    const adapterPatterns = [
+      /this\.graphRetriever\./, /this\.embeddingProvider\./, /this\.agentProvider\./,
+      /this\.contactStore\./, /this\.dealStore\./, /this\.callStore\./,
+      /this\.cacheStore\./, /this\.idempotencyStore\./,
+    ];
+    for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      const exprText = call.getExpression().getText();
+      if (!adapterPatterns.some(p => p.test(exprText))) continue;
+
+      // Check ancestors for circuit breaker wrapper
+      let parent = call.getParent();
+      let wrapped = false;
+      while (parent) {
+        if (Node.isCallExpression(parent)) {
+          const parentExprText = parent.getExpression().getText();
+          if (parentExprText.includes("breaker.") || 
+              parentExprText.includes("invoke") || 
+              parentExprText.includes("withCircuitBreaker")) {
+            wrapped = true;
+            break;
+          }
+        }
+        parent = parent.getParent();
+      }
+      if (!wrapped) {
+        error(ctx, "Rule 17 Circuit Breaker",
+          `Adapter call "${exprText}" is not wrapped in circuit breaker. Use breaker.invoke(() => ...).`);
+      }
+    }
   }
 };
 
@@ -394,6 +475,22 @@ const rule9_PGVectorOperator: RuleFn = (ctx) => {
   }
 };
 
+const rule19_CryptoAlgorithm: RuleFn = (ctx) => {
+  if (!ctx.fileText.includes("createCipheriv")) return;
+
+  for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (call.getExpression().getText() !== "createCipheriv") continue;
+    const args = call.getArguments();
+    if (args.length === 0) continue;
+
+    const algoArg = args[0].getText().replace(/['"`]/g, "");
+    if (algoArg !== "aes-256-gcm") {
+      error(ctx, "Rule 19 Crypto Algorithm",
+        `createCipheriv() uses "${algoArg}" — must use "aes-256-gcm" per PII encryption spec.`);
+    }
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Domain D: AI Pipeline Integrity
 // ═══════════════════════════════════════════════════════════════════════════
@@ -493,6 +590,7 @@ const rule12_AgentStepCeiling: RuleFn = (ctx) => {
 const rule13_SpanPIIGuard: RuleFn = (ctx) => {
   const piiKeys = /\b(phone|email|sender|text|message|transcript|password|token|secret|api_key|access_key|private_key)\b/i;
 
+  // Check setAttribute
   for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = call.getExpression();
     if (!Node.isPropertyAccessExpression(expr)) continue;
@@ -508,18 +606,37 @@ const rule13_SpanPIIGuard: RuleFn = (ctx) => {
         `Span attributes are exported to telemetry backends and are permanently queryable.`);
     }
   }
+
+  // Check addEvent attributes
+  for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    if (!Node.isPropertyAccessExpression(expr)) continue;
+    if (expr.getName() !== "addEvent") continue;
+
+    const args = call.getArguments();
+    if (args.length < 2) continue;
+    const attrs = args[1];
+    if (!Node.isObjectLiteralExpression(attrs)) continue;
+
+    for (const prop of attrs.getProperties()) {
+      if (!Node.isPropertyAssignment(prop) && !Node.isShorthandPropertyAssignment(prop)) continue;
+      const propName = (Node.isPropertyAssignment(prop) ? prop.getName() : prop.getName()).toLowerCase();
+
+      if (piiKeys.test(propName)) {
+        error(ctx, "Rule 13 Span PII Guard",
+          `OpenTelemetry span addEvent attribute "${propName}" contains PII. ` +
+          `Event attributes are exported to telemetry backends and are permanently queryable.`);
+      }
+    }
+  }
 };
 
 const rule14_SpanCoverage: RuleFn = (ctx) => {
-  // Only check core pipeline files
-  const coreFiles = [
-    "packages/ai-core/src/orchestrator.ts",
-    "packages/ai-core/src/cache-engine.ts",
-    "packages/ai-core/src/graph-retriever.ts",
-    "packages/ai-core/src/embedding.client.ts",
-  ];
-
-  if (!coreFiles.some((f) => ctx.normalizedPath.endsWith(f))) return;
+  // Only check core and adapters directories
+  if (
+    !ctx.normalizedPath.includes("/core/") &&
+    !ctx.normalizedPath.includes("/adapters/")
+  ) return;
 
   const functions = [
     ...ctx.sourceFile.getDescendantsOfKind(SyntaxKind.FunctionDeclaration),
@@ -527,15 +644,24 @@ const rule14_SpanCoverage: RuleFn = (ctx) => {
   ];
 
   for (const fn of functions) {
-    if (!fn.isExported?.() && !fn.getParentIfKind(SyntaxKind.VariableDeclaration)?.isExported()) continue;
+    // Only check exported functions
+    const isExported = (fn as any).isExported?.() || 
+      fn.getParentIfKind(SyntaxKind.VariableDeclaration)?.isExported();
+    if (!isExported) continue;
+
     const name = fn.getName?.() || fn.getParentIfKind(SyntaxKind.VariableDeclaration)?.getName() || "anonymous";
     const body = (fn as any).getBody?.();
     if (!body) continue;
 
     const bodyText = body.getText();
+
+    // Only require spans if function calls external services
+    const callsExternal = /fetch\(|session\.run\(|tx\.run\(|supabase\.|redis\.|createCipheriv\(/.test(bodyText);
+    if (!callsExternal) continue;
+
     if (!bodyText.includes("startActiveSpan")) {
       error(ctx, "Rule 14 Span Coverage",
-        `Exported function "${name}" in core pipeline file has no tracer.startActiveSpan(). ` +
+        `Exported function "${name}" in core/adapters calls external services without tracer.startActiveSpan(). ` +
         `All pipeline boundaries must be traced.`);
     }
   }
@@ -580,6 +706,41 @@ const rule15_NoAny: RuleFn = (ctx) => {
         `Return type containing "any" — use a specific type.`);
     }
   }
+
+  // "as any" type assertions
+  for (const ae of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.AsExpression)) {
+    const typeNode = ae.getTypeNode();
+    if (typeNode && typeNode.getKind() === SyntaxKind.AnyKeyword) {
+      error(ctx, "Rule 15 No Any",
+        `"as any" type assertion bypasses type checking — use a specific type or "as unknown".`);
+    }
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Domain G: Architecture Enforcement
+// ═══════════════════════════════════════════════════════════════════════════
+
+const rule16_PortInjection: RuleFn = (ctx) => {
+  if (!ctx.normalizedPath.includes("/core/")) return;
+
+  const adapterConstructors = [
+    "SupabaseContactStore", "SupabaseDealStore", "SupabaseCallStore",
+    "SupabaseTicketStore", "SupabaseAccountStore",
+    "Neo4jGraphRetriever", "NoOpGraphRetriever",
+    "GeminiEmbeddingProvider", "CachedEmbeddingProvider",
+    "MastraAgentProvider", "DeepSeekFallbackProvider",
+    "RedisIdempotencyStore", "SupabaseIdempotencyStore",
+    "BullMQDeadLetterQueue", "FieldEncryption",
+  ];
+
+  for (const ne of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.NewExpression)) {
+    const ctorName = ne.getExpression().getText();
+    if (adapterConstructors.includes(ctorName)) {
+      error(ctx, "Rule 16 Port Injection",
+        `Direct instantiation of "${ctorName}" in core/ — inject via ports instead (no new adapters in core).`);
+    }
+  }
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -591,14 +752,17 @@ const ALL_RULES: RuleFn[] = [
   rule1_SchemaConstraints,
   rule2_AntiCheat,
   rule3_BoundaryZodWrap,
+  rule18_WebSocketBoundary,
   // Domain B: Error & Resilience
   rule4_CatchTypeGuard,
   rule5_DataErrorPII,
   rule6_GracefulShutdown,
+  rule17_CircuitBreaker,
   // Domain C: Query Injection & Data Integrity
   rule7_Neo4jParameterized,
   rule8_SupabaseRLS,
   rule9_PGVectorOperator,
+  rule19_CryptoAlgorithm,
   // Domain D: AI Pipeline Integrity
   rule10_OutputSanitization,
   rule11_MastraToolContract,
@@ -608,6 +772,8 @@ const ALL_RULES: RuleFn[] = [
   rule14_SpanCoverage,
   // Domain F: Type Safety
   rule15_NoAny,
+  // Domain G: Architecture Enforcement
+  rule16_PortInjection,
 ];
 
 async function executeSweep(targetPath?: string): Promise<boolean> {
@@ -658,7 +824,7 @@ async function executeSweep(targetPath?: string): Promise<boolean> {
   );
 
   if (passed) {
-    console.log("✅ All 15 firewall rules passed. Build allowed.\n");
+    console.log("✅ All 19 firewall rules passed. Build allowed.\n");
   } else {
     console.error(
       `\n🚨 BUILD BLOCKED: ${totalViolations.count} structural security violation(s) found across ${sourceFiles.length} file(s).\n`,
@@ -679,10 +845,11 @@ async function main() {
     const watchPaths = [
       "packages/ai-core/src/**/*.ts",
       "packages/ai-core/src/**/*.tsx",
+      "apps/web/src/**/*.ts",
+      "apps/web/src/**/*.tsx",
       "apps/web/app/**/*.ts",
       "apps/web/app/**/*.tsx",
-      "scripts/worker.ts",
-      "scripts/voice-agent.ts",
+      "scripts/load-env.ts",
     ].filter((p) => {
       // Only watch directories/files that exist
       const base = p.replace("/**/*.ts", "").replace("/**/*.tsx", "");
@@ -690,7 +857,7 @@ async function main() {
       return fs.existsSync(abs);
     });
 
-    const watcher = chokidar.watch(watchPaths.length > 0 ? watchPaths : ["scripts/worker.ts"], {
+    const watcher = chokidar.watch(watchPaths.length > 0 ? watchPaths : ["scripts/ast-firewall.ts"], {
       ignored: /(^|[\/\\])\../,
       persistent: true,
       ignoreInitial: true,

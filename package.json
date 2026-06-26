@@ -7,7 +7,10 @@
   "scripts": {
     "check": "bun run scripts/ast-firewall.ts",
     "check:watch": "bun run scripts/ast-firewall.ts --watch",
-    "check:chaos": "bun run scripts/ast-firewall.ts --chaos"
+    "check:chaos": "bun run scripts/ast-firewall.ts --chaos",
+    "validate": "echo 'Validate pipeline — run after implementation is complete.'",
+    "dev:web": "echo 'UI dashboard — run after Task 12 is complete.'",
+    "build:web": "echo 'UI dashboard build — run after Task 12 is complete.'"
   },
   "dependencies": {
     "chokidar": "^5.0.0",

@@ -44,7 +44,39 @@
 - [ ] All API keys absent from logs, error metadata, and span attributes
 - [ ] `parseEnv()` crashes on missing required env vars
 
-## Pillar 4: Deployment — Config + Health
+## Pillar 4a: UI Dashboard — Lightweight Read-Only Workspace
+- [ ] `apps/web/` exists with Vite + Vanilla TS + Motion One (no React/Vue/Angular/Svelte)
+- [ ] `bun dev:web` starts dashboard on localhost:5173 without errors
+- [ ] EventTarget-based state store (`store.ts`) returns `{ get, set, subscribe }`
+- [ ] No external state management libraries (no Redux, Zustand, signals)
+- [ ] CSS Grid renders 65/35 asymmetric layout on desktop
+- [ ] Mobile: grid collapses to single column (transcript full width, sidebar below)
+- [ ] Pure black `#000` background on all surfaces
+- [ ] Inter font loaded (monospace variant for transcript), `#999` body, `#fff` headings
+- [ ] Magnetic card cursor tracking: hover → Motion One `animate(rotateX, rotateY)` ±12 degrees
+- [ ] Magnetic card cursor tracking: disabled on touch devices via `matchMedia("(hover: hover)")`
+- [ ] Magnetic card cursor tracking: `will-change: transform` on hover, removed on mouseleave
+- [ ] Radar border glow: `::before` pseudo-element with `radial-gradient` at `--cursor-x`/`--cursor-y`
+- [ ] Radar border glow: `pointer-events: none` — never blocks card interaction
+- [ ] Radar border glow: `rgba(255,255,255,0.06)` — data readability unaffected
+- [ ] Transcript pane: connects to LiveKit WebSocket, appends text frames with auto-scroll
+- [ ] Transcript pane: customer left-aligned (`#444`), agent right-aligned (`#111`)
+- [ ] Transcript pane: sentiment left-border color (green/`#333`/`#600`)
+- [ ] Transcript pane: handles disconnect with dimmed "transcript paused" state + auto-reconnect
+- [ ] Metrics sidebar: Circuit Breaker Sentinel card (green/amber/red, last transition time)
+- [ ] Metrics sidebar: Cache Health card (circular SVG percentage)
+- [ ] Metrics sidebar: Active Call card (duration timer, sentiment sparkline)
+- [ ] Metrics sidebar: Deals at Risk card (stalled count, top deal name)
+- [ ] Contact context bar: fixed bottom, 80px, shows contact/account/deals during call, system status otherwise
+- [ ] Supabase Realtime subscription: pushes `deals`, `contacts`, `calls` changes to store
+- [ ] `/ready` polling: every 60s, pushes circuit breaker states to store
+- [ ] OTel Prometheus polling: every 10s, pushes cache hit rate + active calls gauge to store
+- [ ] Bundle size: `apps/web/dist/` < 50 KB gzipped (Motion One is 3 KB)
+- [ ] Accessibility: all interactive elements keyboard-navigable
+- [ ] Accessibility: all text meets WCAG AA contrast (>= 4.5:1 on `#000` background)
+- [ ] No framework detected in bundle: `grep -r "react|vue|angular|svelte" apps/web/dist/` returns empty
+
+## Pillar 4b: Deployment — Config + Health
 - [ ] `startup-validator.ts` checks all 6 dependencies (env → Supabase → Neo4j → Redis → Gemini → BullMQ)
 - [ ] Any startup check failure → `process.exit(1)` with structured JSON error
 - [ ] All startup checks pass → `report()` logs JSON success summary
@@ -70,3 +102,29 @@
 - [ ] Neo4j graph has all nodes and edges from seed data
 - [ ] `bun check` passes with 0 violations
 - [ ] `.knowledge/runbook.md` documents architecture, degradation, encryption, health endpoints, DLQ recovery
+
+## Pillar 5: Quantifiable SLA Gates — Pre-Commit Validation
+- [ ] Golden dataset exists at `scripts/golden-dataset.json` (50 examples: 20 WhatsApp, 15 voice, 15 mixed)
+- [ ] DeepEval Faithfulness >= 0.90 on golden dataset
+- [ ] DeepEval Answer Relevancy >= 0.85 on golden dataset
+- [ ] DeepEval Context Precision >= 0.85 on golden dataset
+- [ ] P95 WhatsApp webhook end-to-end latency < 2.0s
+- [ ] P95 idempotency check latency < 50ms
+- [ ] P95 voice STT → orchestrator → TTS latency < 1.5s
+- [ ] P95 full pipeline (cache miss) latency < 3.0s
+- [ ] P95 cache hit path latency < 200ms
+- [ ] P95 2-hop graph expansion latency < 500ms
+- [ ] P95 Gemini embed-2 latency < 1.0s
+- [ ] Active metric series < 2,000
+- [ ] Metric collection interval = 60s (not 10s)
+- [ ] Trace sampling = 10% in production config
+- [ ] `crm.telemetry.metrics_active` gauge functional
+- [ ] `crm.telemetry.traces_bytes` counter functional
+- [ ] Cache hit rate >= 30% under simulated load
+- [ ] Idempotency hit rate <= 5% under simulated load
+- [ ] No circuit breaker open for > 60s during validation run
+- [ ] DLQ queue depth < 50 during validation run
+- [ ] AI generation failure rate < 5% under simulated load
+- [ ] GET /ready P95 latency < 500ms
+- [ ] `bun run validate` aggregates all gates into `scripts/validate-results.json`
+- [ ] `bun run validate` exits 1 if any gate fails

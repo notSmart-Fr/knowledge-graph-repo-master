@@ -1,10 +1,10 @@
 # Production-Grade AI CRM — Hybrid Hexagonal + Free Tier
 
 ## Why
-Rebuild the codebase as an **AI-powered CRM** converging **WhatsApp** (webhook), **realtime voice** (LiveKit), and **web UI** (future) into one AI orchestrator. The previous `production-grade-graphrag-core` spec was monolithic (orchestrator directly instantiates all dependencies) and had critical gaps in operational resilience, security, and deployment readiness. This spec addresses all four production pillars.
+Rebuild the codebase as an **AI-powered CRM** converging **WhatsApp** (webhook), **realtime voice** (LiveKit), and a **lightweight read-only web dashboard** (Vite + Vanilla TS + Motion One in `apps/web/`) into one AI orchestrator. The previous `production-grade-graphrag-core` spec was monolithic (orchestrator directly instantiates all dependencies) and had critical gaps in operational resilience, security, and deployment readiness. This spec addresses all four production pillars.
 
 ## Architecture Decision
-**Hybrid Feature-Driven Hexagonal.** Vertical slices under `features/` for CRM domain cohesion. Core orchestration depends on TypeScript **interfaces (ports)**, not concrete adapters. Adapters live in `adapters/` and implement those ports. Every external boundary (Neo4j, Gemini, Deepgram, Supabase) has a **fallback adapter** for graceful degradation.
+**Hybrid Feature-Driven Hexagonal.** Vertical slices under `features/` for CRM domain cohesion. Core orchestration depends on TypeScript **interfaces (ports)**, not concrete adapters. Adapters live in `adapters/` and implement those ports. Every external boundary (Neo4j, Gemini, Cartesia, Supabase) has a **fallback adapter** for graceful degradation.
 
 ```
 Transport (WhatsApp / Voice / Web)
@@ -25,7 +25,7 @@ Transport (WhatsApp / Voice / Web)
 | Supabase pgvector | Included in 500MB | 768-dim Gemini embed-2. Cache only business-significant queries. |
 | Neo4j AuraDB Free | 200MB, 50K nodes, 175K edges | Sparse graph — only business-significant relationships. No raw transcript nodes. |
 | LiveKit | 50GB/month free tier | Voice only, no video. Low concurrent rooms. |
-| Deepgram STT | 200 hours free/month | Covers substantial call volume. |
+| Cartesia | 200 hours free/month | Covers substantial call volume. |
 | Mastra + AI models | Pay-per-use (Gemini/DeepSeek) | Semantic cache to skip model calls. DeepSeek for generation (cheaper). Fallback: DeepSeek if Gemini fails. |
 | Vercel deployment | 100GB bandwidth | Edge functions for API. Static dashboard. |
 | Upstash Redis (free) | 256MB, 10K commands/day | Idempotency keys + BullMQ. |
@@ -175,7 +175,146 @@ The system SHALL validate at startup that no credential is missing, expired, or 
 
 ---
 
-### Pillar 4: Deployment — Config Validation + Health Endpoints
+### Pillar 4a: UI Layer — Lightweight Read-Only Dashboard
+
+#### Requirement: Isolated Frontend Package
+The system SHALL provide a read-only operator dashboard in `apps/web/` using **Vite + Vanilla TypeScript + Motion One**. The frontend consumes data exclusively through HTTP and WebSocket — it never imports `packages/ai-core/`, never calls the orchestrator directly, and never mutates CRM state.
+
+**Stack:**
+| Layer | Choice | Justification |
+|---|---|---|
+| Bundler | Vite 6+ | Zero-config TS, HMR, tree-shaking. No framework lock-in. |
+| Runtime | Vanilla TypeScript | Direct DOM manipulation. No virtual DOM overhead, no hydration. |
+| Animation | Motion One 4.x | 3 KB. Native Web Animations API. GPU-accelerated CSS transforms (`rotateX`, `rotateY`, `matrix3d`). |
+| Styling | CSS custom properties + `@container` queries | The platform already does this. No Tailwind, no CSS-in-JS. |
+| State | EventTarget-based store | Lightweight pub/sub. No Redux, Zustand, or signals library needed. |
+
+**Data consumed by UI (read-only):**
+- Supabase Realtime → `deals`, `contacts`, `calls` table changes (WebSocket push)
+- LiveKit → transcript stream (WebSocket, raw text frames displayed in transcript pane)
+- `GET /ready` on port 8280 → circuit breaker states, adapter health
+- OTel Prometheus endpoint → cache hit rate, active calls gauge (polled every 10s)
+
+#### Scenario: Dashboard loads during active call
+- **WHEN** an operator opens `apps/web` in a browser during a live voice call
+- **THEN** the dashboard connects to Supabase Realtime (contacts, deals, call metadata), LiveKit (transcript stream), and `/ready` (health), rendering all three data sources without blocking each other. If any data source fails, its panel shows a dimmed "data unavailable" state — the dashboard never shows a spinner or blocks.
+
+#### Scenario: Circuit breaker opens during viewing
+- **WHEN** Neo4j's circuit breaker opens while the dashboard is open
+- **THEN** the metrics sidebar updates the circuit breaker indicator from green → amber → red within 60s (next `/ready` poll). The transcript pane is unaffected. The operator sees the degradation without any modal or interruption.
+
+#### Requirement: Asymmetrical Workspace Layout
+The dashboard SHALL render as a pure black (`#000`) CSS Grid workspace with two asymmetrical zones.
+
+**Grid definition:**
+```
++-----------------------------+------------+
+|                             |  Circuit   |
+|   TRANSCRIPT STREAM          |  Status    |
+|   (65% width)               |  (35%)     |
+|                             |            |
+|   Live scrolling text       |  Sentinel  |
+|   Speaker labels            |  Card      |
+|   Sentiment markers         |            |
+|                             |  Metrics   |
+|                             |  Grid      |
++-----------------------------+------------+
+|  CONTACT CONTEXT BAR (100% width, 80px)  |
++------------------------------------------+
+```
+
+**Zones:**
+1. **Transcript Stream** (65% width, full height minus 80px bottom bar) — LiveKit text frames appended to a scroll container. Speaker segments alternated visually (left-aligned for customer, right-aligned for agent). Sentiment indicators as subtle left-border color shifts. Typography: `Inter` monospace variant, `#999` on `#000`.
+
+2. **Metrics Sidebar** (35% width) — Stack of magnetic cards:
+   - Circuit Breaker Sentinel Card — adapter name, state (green/amber/red), last transition time
+   - Cache Health Card — hit rate gauge (circular SVG percentage), current throughput
+   - Active Call Card — call duration timer, sentiment trend mini-sparkline
+   - Deals at Risk Card — count of stalled deals, top deal name
+
+3. **Contact Context Bar** (100% width, 80px height, bottom-fixed) — During a call: contact name, account, open deals count, last interaction date. Outside a call: system status summary.
+
+**Pure black rationale:** Workspace displays sensitive CRM data. Pure black reduces eye fatigue during long monitoring sessions (operators may watch calls for hours). High-contrast text (`#999` body, `#fff` headings) remains readable. No decorative backgrounds — the data is the focus.
+
+#### Requirement: Magnetic Card Cursor Tracking
+Every card in the Metrics Sidebar SHALL respond to cursor proximity with a 3D tilt effect computed from pointer position relative to card center.
+
+**Implementation (Motion One):**
+```ts
+// Per card: mousemove listener → Motion One animate()
+card.addEventListener("mousemove", (e: MouseEvent) => {
+  const rect = card.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width - 0.5;   // -0.5 to +0.5
+  const y = (e.clientY - rect.top) / rect.height - 0.5;
+  animate(card, {
+    rotateX: y * -12,   // degrees — tilt away from cursor
+    rotateY: x * 12,
+  }, { duration: 0.3, easing: [0.22, 0.61, 0.36, 1] }); // custom ease-out
+});
+
+card.addEventListener("mouseleave", () => {
+  animate(card, { rotateX: 0, rotateY: 0 }, { duration: 0.6 });
+});
+```
+
+**Constraints:**
+- `transform-style: preserve-3d` and `perspective: 800px` set on card container.
+- Maximum tilt: ±12 degrees. Content inside card SHALL remain readable at all angles.
+- Touch devices: effect disabled. `matchMedia("(hover: hover)")` guards the listener registration.
+- Performance: `will-change: transform` set during animation, removed on `mouseleave`. No layout thrashing — only compositor-layer properties modified.
+
+#### Requirement: Ambient Radar Border Glows
+Card hover states SHALL cast a `radial-gradient` mask that tracks the raw cursor pixel position over the card element, creating a subtle spotlight border effect.
+
+**Implementation (CSS custom property driven by mousemove):**
+```ts
+card.addEventListener("mousemove", (e: MouseEvent) => {
+  const rect = card.getBoundingClientRect();
+  const px = ((e.clientX - rect.left) / rect.width) * 100; // 0-100%
+  const py = ((e.clientY - rect.top) / rect.height) * 100;
+  card.style.setProperty("--cursor-x", `${px}%`);
+  card.style.setProperty("--cursor-y", `${py}%`);
+});
+```
+
+```css
+.magnetic-card {
+  position: relative;
+  background: #0a0a0a;
+  border: 1px solid #1a1a1a;
+  border-radius: 12px;
+}
+
+.magnetic-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: radial-gradient(
+    250px circle at var(--cursor-x, 50%) var(--cursor-y, 50%),
+    rgba(255, 255, 255, 0.06),
+    transparent 60%
+  );
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.magnetic-card:hover::before {
+  opacity: 1;
+}
+```
+
+**Constraints:**
+- Glow is a `::before` pseudo-element — no extra DOM nodes.
+- `pointer-events: none` on the glow so it never blocks card interaction.
+- Gradient size: 250px circle (smaller than card, creating edge-aware spotlight).
+- Color: `rgba(255,255,255,0.06)` — extremely subtle. Data readability must never be affected.
+- Touch devices: disabled via `matchMedia("(hover: hover)")`.
+
+---
+
+### Pillar 4b: Deployment — Config Validation + Health Endpoints
 
 #### Requirement: Immutable Startup Configuration Validator
 The system SHALL validate all external dependencies and required configuration BEFORE accepting any traffic. Validation is run-once at process start. If any check fails, the process exits with code 1 and descriptive error.
@@ -232,7 +371,7 @@ packages/ai-core/src/
 ├── features/          # Vertical CRM slices
 │   ├── contacts/      # Contact types, IContactStore, Mastra tools, Supabase adapter
 │   ├── deals/         # Deal types, IDealStore, tools
-│   ├── calls/         # Call types, ICallStore, Deepgram adapter, summarizer
+│   ├── calls/         # Call types, ICallStore, Cartesia adapter, summarizer
 │   ├── accounts/      # Account types, IAccountStore
 │   ├── tickets/       # Ticket types, ITicketStore
 │   └── pipeline/      # PipelineStage types, analyzer agent
@@ -260,6 +399,23 @@ packages/ai-core/src/
 │   ├── health-router.ts      # /health and /ready endpoints
 │   └── health-checks.ts      # Per-adapter health check functions
 └── index.ts                   # Barrel export
+
+apps/web/                    # Read-only operator dashboard
+├── index.html               # Entry point
+├── vite.config.ts           # Vite config (zero plugins, vanilla TS)
+├── tsconfig.json
+├── src/
+│   ├── main.ts              # App bootstrap, WebSocket connections
+│   ├── store.ts             # EventTarget-based state store
+│   ├── components/
+│   │   ├── transcript-pane.ts    # LiveKit text stream
+│   │   ├── metrics-sidebar.ts    # Magnetic card grid
+│   │   ├── contact-bar.ts        # Bottom context bar
+│   │   └── magnetic-card.ts      # Reusable card with cursor tracking + radar glow
+│   └── styles/
+│       ├── base.css              # Pure black #000, Inter font, CSS vars
+│       ├── grid.css              # Asymmetric 65/35 CSS Grid
+│       └── card.css              # Magnetic card styles, radar glow
 ```
 
 ### Requirement: Omni-Channel Architecture (Modified)
@@ -271,7 +427,7 @@ Each transport layer is now a thin adapter that depends on the same `Orchestrato
 
 #### Scenario: Voice call routes through orchestrator (unchanged)
 - **WHEN** a LiveKit voice call streams audio frames
-- **THEN** `voice-agent.ts` runs STT via Deepgram, passes text to `orchestrator.processIntent()`, converts response to TTS audio, and pushes to LiveKit room.
+- **THEN** `voice-agent.ts` runs STT via Cartesia, passes text to `orchestrator.processIntent()`, converts response to TTS audio, and pushes to LiveKit room.
 
 ### Requirement: Orchestrator Pipeline (Modified)
 The orchestrator now accepts injected ports, not direct dependencies.
@@ -288,6 +444,87 @@ The orchestrator now accepts injected ports, not direct dependencies.
 - Flat domain model structure (`domain/contact.ts`, `domain/deal.ts` etc.) — replaced by vertical feature slices
 - Direct adapter imports in orchestrator — replaced by port injection
 - Hardcoded single-provider dependencies — replaced by fallback chains
+
+---
+
+## V. QUANTIFIABLE SUCCESS METRICS & SLA GATES
+
+Every requirement in this spec is verifiable. Below are the mathematical thresholds that gate deployment readiness. A feature branch is **not valid for merge** unless all gates pass.
+
+### 5.1 RAG Triad Quality Gates
+
+Evaluated via DeepEval (local) on a fixed 50-example golden dataset of CRM conversations. The triad measures the pipeline end-to-end: embedding → graph expansion → agent generation.
+
+| Metric | Threshold | Measurement | Failure Consequence |
+|---|---|---|---|
+| **Faithfulness** | >= 0.90 | % of claims in agent output that are supported by retrieved context | Block merge. Response is hallucinating against provided context. |
+| **Answer Relevancy** | >= 0.85 | % of output sentences that answer the original question | Block merge. Agent is drifting off-topic or rambling. |
+| **Context Precision** | >= 0.85 | % of retrieved chunks that are actually relevant to the question | Warn. Graph expansion is pulling noise. Review retrieval depth. |
+
+**Golden dataset composition:**
+- 20 WhatsApp CRM queries (contact lookups, deal status, ticket creation)
+- 15 voice call transcripts (sales call segments, objection handling, closing questions)
+- 15 mixed intent (pipeline status, account health, multi-entity queries)
+
+**Evaluation runner:** `scripts/eval-rag.ts` (updated) — runs DeepEval against the golden dataset, outputs `scripts/eval-results.json`.
+
+### 5.2 API Operational Bounds (P95 Latency)
+
+Must hold under seed data load (25 contacts, 15 deals, 8 calls, 5 tickets in Supabase; 50+ nodes in Neo4j).
+
+| Channel | Operation | P95 Threshold | Why This Number |
+|---|---|---|---|
+| WhatsApp webhook | End-to-end ingestion → response | < 2.0s | Meta retries webhooks after 2-3s. Slower = duplicate deliveries. |
+| WhatsApp webhook | Idempotency check only | < 50ms | Must not add meaningful latency to the hot path. |
+| Voice | STT chunk → orchestrator → TTS | < 1.5s | > 1.5s = unnatural pause in conversation. User interrupts or hangs up. |
+| Orchestrator | Full pipeline (cache miss) | < 3.0s | Cold path ceiling. Covers: embedding API + Neo4j traversal + agent generation. |
+| Orchestrator | Cache hit path | < 200ms | Vector lookup + deserialize. Must feel instant. |
+| Graph expansion | 2-hop traversal | < 500ms | Neo4j AuraDB free tier latency for small graph. |
+| Embedding API | Gemini embed-2 single text | < 1.0s | Gemini API P95 on free tier. |
+
+**Measurement:** OTel histogram metrics (already defined in Pillar 4). P95 computed from `crm.graph.traversal.duration_ms`, `crm.ai.generation.duration_ms`, etc.
+
+### 5.3 Telemetry Budget Ceilings (Grafana Cloud Free Tier)
+
+Grafana Cloud Free provides: **50 GB traces/logs, 10K active metrics, 14-day retention.** The following ceilings keep us under these limits indefinitely.
+
+| Resource | Free Limit | Our Ceiling | Enforcement |
+|---|---|---|---|
+| **Active metrics** | 10,000 series | 2,000 series | Limit to 9 metric families × ~50 unique label combinations each = ~450 series. Remaining headroom for growth. |
+| **Trace volume** | 50 GB/month | 5 GB/month | Head-based sampling at 10% in production. 100% in dev/chaos mode. |
+| **Log volume** | 50 GB/month | 2 GB/month | WARN+ only in production. Structured JSON, no stack traces in logs (those go to DLQ metadata). |
+| **Span count per request** | — | <= 1 span per orchestrator step (8 spans/request max) | Firewall Rule 14 already enforces 1 span per step. No nested sub-spans. |
+| **Metric collection interval** | — | 60s (reduce from default 10s) | `PeriodicExportingMetricReader({ exportIntervalMillis: 60000 })` in otel-bootstrap.ts. |
+
+**Budget alerts:**
+- OTel gauge `crm.telemetry.metrics_active` tracks current active metric series count
+- OTel counter `crm.telemetry.traces_bytes` tracks monthly trace data volume
+- When either crosses 80% of ceiling → WARN log. 95% → ERROR log + page (if alerting is configured).
+
+### 5.4 Operational SLA Gates
+
+| Gate | Threshold | Measurement |
+|---|---|---|
+| **Cache hit rate** | >= 30% | `crm.cache.hits / crm.cache.requests` over a rolling 1-hour window. Below 30% = embeddings too dissimilar or threshold too tight. |
+| **Idempotency hit rate** | <= 5% | `crm.webhooks.duplicate / total webhooks` over 1 hour. > 5% = Meta is aggressively redelivering — check outbound latency. |
+| **Circuit breaker state** | No open breaker for > 60s | `crm.circuit_breaker.state` gauge. If any stays open > 60s, the fallback is running — check the external service. |
+| **DLQ queue depth** | < 50 items per queue | Counter `crm.dlq.enqueued` minus replayed. > 50 backlog = ingestion or outbound delivery is failing systematically. |
+| **AI generation failure rate** | < 5% | `crm.errors.total{domain="gemini"} / total generations` over 1 hour. > 5% = DeepSeek fallback is handling significant load. |
+| **Health endpoint latency** | GET /ready < 500ms P95 | Cached health checks (10s/5s/60s) should keep this well under. |
+
+### 5.5 Pre-Commit Validation Pipeline
+
+Ran automatically before merge. Blocking on failure.
+
+```
+bun check           # 19-rule AST firewall. Exit 1 = blocked.
+bun run validate    # Pre-commit quality gates (see tasks.md Task 13)
+  ├── RAG triad (DeepEval on golden dataset)
+  ├── P95 latency (simulated load against seed data)
+  ├── Metric ceiling check (active series < 2000)
+  └── SLA gate check (cache hit rate, idempotency, CB state)
+  → Output: scripts/validate-results.json. Exit 1 = blocked.
+```
 
 ---
 

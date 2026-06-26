@@ -4,7 +4,7 @@
 - **Runtime:** Bun 1.3+
 - **Data:** Supabase (pgvector) + Neo4j AuraDB Free
 - **AI:** Gemini (embedding), Mastra (agents), DeepSeek (fallback)
-- **Voice:** LiveKit + Deepgram STT
+- **Voice:** LiveKit + Cartesia
 - **Messaging:** BullMQ (Redis), WhatsApp API
 - **Telemetry:** OpenTelemetry → Grafana Cloud Free
 
