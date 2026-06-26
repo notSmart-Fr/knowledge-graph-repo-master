@@ -1,0 +1,18 @@
+[install]
+# Use bun's native lockfile
+save = true
+
+[install.cache]
+# Disable global cache for hermetic builds
+disable = false
+
+[install.workspaces]
+# Bun monorepo workspace paths
+packages = ["packages/*"]
+
+[run]
+# Bun runs TypeScript directly — no transpilation step needed
+bun = true
+
+[test]
+preload = []
