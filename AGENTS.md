@@ -44,6 +44,13 @@ scripts/           — worker.ts, voice-agent.ts, seed.ts, ingest.ts, eval-rag.t
 .knowledge/        — architecture.md, code-map.md (data flow traces)
 ```
 
+## Agent Guidelines
+
+- **Unknown fixes → search the internet first.** Use `WebSearch` before guessing. Cite sources when applying external solutions.
+- **Use MCP codebase-memory tools whenever possible.** Before reading files or exploring the codebase, use `search_graph`, `query_graph`, `search_code`, `trace_path`, or `get_code_snippet` from the `mcp_codebase-memory-mcp` server. These tools understand the project's 734-node/1258-edge knowledge graph and can surface relationships that file-by-file reading would miss. Fall back to `Grep`/`Glob`/`Read` only when MCP tools don't cover the query shape.
+- **Never modify `.vscode/mcp.json`** — user must handle MCP server config changes manually.
+- **Prefer existing patterns.** Check `code-map.md` and `architecture.md` in `.knowledge/` before writing new code.
+
 ## Spec Location
 `.trae/specs/production-grade-graphrag-core/` — spec.md (5 pillars + SLA gates), tasks.md (15 tasks), checklist.md (130+ checkpoints)
 
