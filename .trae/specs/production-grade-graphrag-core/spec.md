@@ -26,7 +26,8 @@ Transport (WhatsApp / Voice / Web)
 | Neo4j AuraDB Free | 200MB, 50K nodes, 175K edges | Sparse graph — only business-significant relationships. No raw transcript nodes. |
 | LiveKit | 50GB/month free tier | Voice only, no video. Low concurrent rooms. |
 | Cartesia | 200 hours free/month | Covers substantial call volume. |
-| Mastra + AI models | Pay-per-use (Gemini/DeepSeek) | Semantic cache to skip model calls. DeepSeek for generation (cheaper). Fallback: DeepSeek if Gemini fails. |
+| Mastra + AI models | Pay-per-use (Gemini/DeepSeek) | Semantic cache to skip model calls. DeepSeek for generation (cheaper). Fallback: DeepSeek if Gemini fails. Third tier: Ollama (local, $0) when both cloud APIs unreachable. |
+| Ollama (local) | Your hardware (RAM/GPU) | Optional third-tier fallback. 7B model uses ~8GB RAM. Zero API cost. Conditional on LOCAL_LLM_URL env var. |
 | Vercel deployment | 100GB bandwidth | Edge functions for API. Static dashboard. |
 | Upstash Redis (free) | 256MB, 10K commands/day | Idempotency keys + BullMQ. |
 
@@ -105,12 +106,60 @@ The system SHALL define TypeScript interfaces for every external boundary in a s
 - **WHEN** a developer wants to switch from Gemini to a local embedding model
 - **THEN** they implement `IEmbeddingProvider` in a new adapter file and inject it into orchestrator config. Zero changes to orchestrator internals.
 
+#### Requirement: Local Model Fallback (Ollama)
+The system SHALL support a third-tier `IAgentProvider` implementation using a local Ollama instance. This tier activates ONLY when both Gemini and DeepSeek circuits are open, making the AI pipeline fully operational at zero API cost when cloud providers are unreachable.
+
+**Activation:** The fallback chain is: `Gemini → DeepSeek → Ollama → cached response`. The Ollama tier is conditional — included only when `LOCAL_LLM_URL` env var is set. If unset, the chain skips from DeepSeek directly to cached response.
+
+**Expected quality trade-off:** Local 7B models (Llama 3.1, Mistral, Qwen 2.5) will not match Gemini's CRM reasoning quality for complex deal analysis or multi-turn context. They are adequate for simple lookups ("what's the status of deal X?") and serve as a safety net rather than a primary provider.
+
+#### Scenario: All cloud APIs unreachable, Ollama available
+- **WHEN** both Gemini and DeepSeek circuit breakers are open AND `LOCAL_LLM_URL` is set
+- **THEN** the orchestrator routes AI generation to `OllamaLocalProvider`. The response carries `{ degraded: true, modelUsed: "ollama" }` in metadata. The customer receives an acceptable response for simple queries.
+
+#### Scenario: Ollama not installed or unconfigured
+- **WHEN** `LOCAL_LLM_URL` is unset and both cloud APIs are down
+- **THEN** the orchestrator returns a cached response (if available) or an error. The Ollama tier is silently skipped.
+
 #### Scenario: Testing the orchestrator without infrastructure
 - **WHEN** a unit test runs
 - **THEN** all ports are injected as mocks. The test verifies orchestrator pipeline logic without touching Supabase, Neo4j, or any AI model.
 
-#### Requirement: AST Firewall Enforcement (Existing — Unchanged)
-The system SHALL continue enforcing all 15 AST firewall rules at commit time. The firewall now scans `features/`, `adapters/`, `core/`, and `agents/` in addition to existing paths.
+#### Requirement: AST Firewall Enforcement (Existing — Enhanced)
+The system SHALL continue enforcing all 19 AST firewall rules at commit time. The firewall now scans `features/`, `adapters/`, `core/`, and `agents/` in addition to existing paths.
+
+**Rule 3 (Boundary Zod Wrap) improvement:** Uses a two-tier check — ancestor (`Schema.parse()` wraps `fetch()` in the call chain) plus a sibling-parse fallback that walks subsequent statements to find `.parse()` consuming the fetch result or its `.json()` output, including intermediate variables.
+
+#### Requirement: Unit Test Discipline
+The system SHALL include a minimal test suite using `bun test` (zero additional dependencies). Tests target only non-trivial logic — trivial one-liners, type definitions, and barrel exports are excluded.
+
+**What gets tested (non-trivial logic where silent breakage causes harm):**
+| Module | Risk if broken | One test |
+|---|---|---|
+| `sanitize.ts` | AI outputs raw PII to customers | Does "call me at 555-1234" → "[REDACTED]"? |
+| `errors.ts` | PII leaks into error metadata in logs | Does `IntegrationError` strip `phone` from meta? |
+| `circuit-breaker.ts` | Never opens → hammer dead adapter forever | After 3 failures, is state "open"? |
+| `field-encryption.ts` | Can't decrypt what was stored | encrypt → decrypt roundtrip matches original |
+| `orchestrator.ts` | Pipeline steps run out of order or skip | Mock all ports, verify each step was called |
+| Each adapter | Wrong query, wrong return type | Contract test: implements interface + returns Zod-valid data |
+
+**What gets NO test (trivial, compiler-verified, or self-announcing on failure):**
+- `ports.ts` domain types — TypeScript compiler verifies these
+- `index.ts` barrel export — wrong export → nothing imports, compiler catches it
+- `logger.ts` — `console.log` wrapper; PII sanitization tested via `errors.test.ts`
+- `env-schema.ts` — crashes at import on bad env, immediately visible
+- Feature type files — type definitions, compiler is the test
+- `health-router.ts` — 5-line `Bun.serve`, trivial
+
+**Test layout:** Each test lives in `__tests__/` next to the code it tests. No coverage targets. No integration tests in CI (needs real services — those are the SLA gates in Task 13). No mock framework (bun has `mock` built in).
+
+#### Scenario: Adding a new adapter
+- **WHEN** a developer adds `adapters/ai/local-model-provider.ts`
+- **THEN** they also add `adapters/ai/__tests__/local-model-provider.test.ts` with a contract test verifying the interface is implemented and return types match Zod schemas. The test is 20-40 lines.
+
+#### Scenario: Running the test suite
+- **WHEN** `bun test` runs
+- **THEN** all `__tests__/` directories under `packages/ai-core/src/` are executed. The suite completes in under 5 seconds with no external service dependencies.
 
 ---
 

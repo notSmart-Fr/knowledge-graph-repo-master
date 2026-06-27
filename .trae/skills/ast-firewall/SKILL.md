@@ -24,7 +24,9 @@ Output: `.gate-results.json` at repo root. Exit 0 = pass, 1 = build blocked.
 ### Domain A: Zod Boundary Safety
 1. **Schema Constraints** — Exported `*Schema`: `z.string()` must have `.max()`, `z.number()` must have `.min() + .max()`
 2. **Anti-Cheat** — Forbid `z.any().parse()`, `z.unknown().safeParse()`
-3. **Boundary Zod Wrap** — Every `fetch()`/`Bun.fetch()` must be inside `Schema.parse()` or `.safeParse()`
+3. **Boundary Zod Wrap** — Every `fetch()`/`Bun.fetch()` must be Zod-validated. Uses a two-tier check:
+   - **Ancestor** — `.parse()`/`.safeParse()` must wrap `fetch()` in the call chain (e.g. `Schema.parse(await fetch(...).then(r => r.json()))`).
+   - **Sibling fallback** — If not an ancestor, the rule walks subsequent statements in the same block looking for `.parse()` whose argument references the fetch result variable or its `.json()` output. Tracks intermediate variables (e.g. `const raw = await r.json(); Schema.parse(raw)`) so the common two-statement pattern is accepted.
 18. **WebSocket Boundary** — Realtime event handlers (`supabase.channel.on()`) that access payload/data must Zod.parse() input
 
 ### Domain B: Error & Resilience

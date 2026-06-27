@@ -8,13 +8,23 @@
     "check": "bun run scripts/ast-firewall.ts",
     "check:watch": "bun run scripts/ast-firewall.ts --watch",
     "check:chaos": "bun run scripts/ast-firewall.ts --chaos",
+    "typecheck": "cd packages/ai-core && tsc --noEmit",
+    "clean": "bun --eval \"const fs = require('fs'); ['packages/ai-core/dist', 'tsconfig.tsbuildinfo', 'packages/ai-core/tsconfig.tsbuildinfo'].forEach(p => { try { fs.rmSync(p, { recursive: true, force: true }) } catch {} })\"",
     "validate": "echo 'Validate pipeline — run after implementation is complete.'",
     "dev:web": "echo 'UI dashboard — run after Task 12 is complete.'",
     "build:web": "echo 'UI dashboard build — run after Task 12 is complete.'"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.219.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.219.0",
+    "@opentelemetry/sdk-metrics": "^2.8.0",
+    "@opentelemetry/sdk-node": "^0.219.0",
     "chokidar": "^5.0.0",
     "ts-morph": "^28.0.0",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
   }
 }

@@ -18,6 +18,7 @@ description: >-
 4. Redis connectivity (`PING`)
 5. Gemini API key validity (one lightweight embedding call)
 6. BullMQ queue reachable
+7. Ollama reachable (if `LOCAL_LLM_URL` is set — `GET /api/tags`)
 
 Each check retries 3 times with 1s backoff.
 Any failure → `process.exit(1)` with structured JSON error.

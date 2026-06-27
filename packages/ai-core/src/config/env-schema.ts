@@ -12,6 +12,7 @@ export const envSchema = z.object({
   // AI
   GEMINI_API_KEY: z.string().startsWith("AIza"),
   DEEPSEEK_API_KEY: z.string().startsWith("sk-"),
+  LOCAL_LLM_URL: z.string().url().default("http://localhost:11434").optional(),
   // Voice
   LIVEKIT_URL: z.string().url(),
   LIVEKIT_API_KEY: z.string().min(3),

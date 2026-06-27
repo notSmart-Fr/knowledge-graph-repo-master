@@ -5,6 +5,8 @@
 - [ ] `NoOpGraphRetriever` fallback returns empty context when Neo4j circuit is open
 - [ ] `CachedEmbeddingProvider` returns stale embeddings when Gemini circuit is open
 - [ ] `DeepSeekFallbackProvider` activates when primary AI generation circuit is open
+- [ ] `OllamaLocalProvider` activates when both Gemini AND DeepSeek circuits are open (only if `LOCAL_LLM_URL` set)
+- [ ] Fallback chain: Gemini → DeepSeek → Ollama (conditional) → cached response
 - [ ] `RedisIdempotencyStore` returns `true` on first call, `false` on duplicates within TTL
 - [ ] `SupabaseIdempotencyStore` fallback works when Redis is down
 - [ ] `BullMQDeadLetterQueue` routes failed jobs to `dlq:{queue}:*` with metadata
@@ -25,6 +27,20 @@
 - [ ] All agents have `maxSteps` <= 10 (firewall Rule 12)
 - [ ] `bun check` scans `features/`, `adapters/`, `core/`, `agents/` directories
 - [ ] `bun check:chaos` still flags 47 violations
+- [ ] `bun test` completes with 0 failures (all `__tests__/` directories under `packages/ai-core/src/`)
+- [ ] `sanitize.test.ts` — phone numbers + emails in output → "[REDACTED]"
+- [ ] `errors.test.ts` — IntegrationError meta strips PII keys (phone, email, token, etc.)
+- [ ] `logger.test.ts` — JSON output valid, PII keys excluded from meta
+- [ ] `circuit-breaker.test.ts` — 3 failures → open, cooldown → half-open, success → closed
+- [ ] `orchestrator.test.ts` — mock all 11 ports, pipeline steps called in order
+- [ ] `field-encryption.test.ts` — encrypt → decrypt roundtrip matches original
+- [ ] `store-contracts.test.ts` — all 5 Supabase adapters implement interfaces + return Zod-valid types
+- [ ] `retriever-contracts.test.ts` — both Neo4j retrievers implement IGraphRetriever
+- [ ] `provider-contracts.test.ts` — all 4 AI providers implement their interfaces
+- [ ] `messaging-contracts.test.ts` — idempotency store + DLQ implement interfaces
+- [ ] `health.test.ts` — GET /health 200, GET /ready 503 when degraded
+- [ ] No `bun test` file exceeds 40 lines
+- [ ] No test imports external mock frameworks — only `bun` built-in mock
 
 ## Pillar 3: Security — PII + RBAC + Secrets
 - [ ] `FieldEncryption.encrypt()` returns `{ ciphertext, keyId, algorithm: "AES-256-GCM" }`

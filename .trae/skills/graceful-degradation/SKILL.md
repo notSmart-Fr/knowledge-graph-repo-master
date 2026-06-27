@@ -38,10 +38,14 @@ GeminiEmbeddingProvider → circuit opens → CachedEmbeddingProvider
 ### AI Generation (when primary model is down)
 ```
 MastraAgentProvider (Gemini) → circuit opens → DeepSeekFallbackProvider
+                                                 → circuit opens → OllamaLocalProvider
+                                                                     (local, zero cost)
                                                  ↓
-                                    If both fail → return cached response
+                                    If all three fail → return cached response
                                                      (if available)
 ```
+
+**Ollama tier:** Conditional — only included when `LOCAL_LLM_URL` env var is set. Uses local Ollama REST API. Zero API cost. Quality trade-off: local 7B models adequate for simple lookups, not complex CRM reasoning.
 
 ## Dead Letter Queue (adapters/messaging/)
 

@@ -4,37 +4,54 @@
 - **Runtime:** Bun 1.3+
 - **Data:** Supabase (pgvector) + Neo4j AuraDB Free
 - **AI:** Gemini (embedding), Mastra (agents), DeepSeek (fallback)
-- **Voice:** LiveKit + Cartesia
+- **Voice:** LiveKit + Deepgram STT + Cartesia TTS
 - **Messaging:** BullMQ (Redis), WhatsApp API
 - **Telemetry:** OpenTelemetry → Grafana Cloud Free
+- **Security:** AES-256-GCM field encryption, RBAC + RLS
+- **Frontend:** Vite + Vanilla TS + Motion One (`apps/web/`)
 
-## Architecture
+## Architecture (Hybrid Hexagonal)
 ```
-Transport (WhatsApp / Voice / Web)
-  → Orchestrator (depends on ports)
-      → IContactStore →    Supabase adapter
-      → IGraphRetriever →   Neo4j adapter  │  NoOp (degraded)
-      → IEmbeddingProvider → Gemini         │  Cached (degraded)
-      → IAgentProvider →     Mastra         │  DeepSeek (degraded)
-      → IIdempotencyStore → Redis           │  Supabase (fallback)
-      → IDeadLetterQueue →  BullMQ
+Transport (WhatsApp / Voice / Web Dashboard)
+  → Orchestrator (depends ONLY on ports)
+      → IContactStore       → Supabase
+      → IDealStore          → Supabase
+      → ICallStore          → Supabase
+      → ITicketStore        → Supabase
+      → IAccountStore       → Supabase
+      → IGraphRetriever     → Neo4j      │ NoOp (degraded)
+      → IEmbeddingProvider  → Gemini     │ Cached (degraded)
+      → IAgentProvider      → Mastra     │ DeepSeek │ Ollama (degraded)
+      → ICacheStore         → pgvector
+      → IIdempotencyStore   → Redis      │ Supabase (fallback)
+      → IDeadLetterQueue    → BullMQ
 ```
 
 ## Directory Layout
 ```
 packages/ai-core/src/
 ├── features/      — CRM vertical slices (contacts, deals, accounts, tickets, calls, pipeline)
-├── core/          — ports.ts, orchestrator.ts, errors.ts, logger.ts, sanitize.ts
+│   └── */         — types.ts + tools.ts per slice
+├── core/          — ports.ts, orchestrator.ts, circuit-breaker.ts, errors.ts, logger.ts, sanitize.ts
+│   └── __tests__/ — unit tests (bun test, zero deps)
 ├── adapters/      — supabase/, neo4j/, ai/, messaging/, encryption/
-├── agents/        — Mastra agent definitions (crm-agent, call-summarizer, live-assist, pipeline-analyzer)
-├── config/        — startup-validator.ts, env-schema.ts
-└── health/        — health-router.ts, health-checks.ts
+├── agents/        — crm-agent, call-summarizer, live-assist, pipeline-analyzer
+├── config/        — startup-validator.ts, env-schema.ts, otel-bootstrap.ts
+└── health/        — health-router.ts (:8280), health-checks.ts
+
+apps/web/          — Vite + Vanilla TS dashboard (read-only)
+scripts/           — worker.ts, voice-agent.ts, seed.ts, ingest.ts, eval-rag.ts, validate.ts
+.knowledge/        — architecture.md, code-map.md (data flow traces)
 ```
 
-## Key Files
-| File | Purpose |
-|---|---|
-| `.trae/rules/project_rules.md` | Behavioral constraints (lazy senior dev mode) |
-| `.trae/skills/` | On-demand skills for specific domains |
-| `.trae/specs/production-grade-graphrag-core/` | Full spec, task list, checklist |
-| `scripts/ast-firewall.ts` | 15-rule compile-time security firewall |
+## Spec Location
+`.trae/specs/production-grade-graphrag-core/` — spec.md (5 pillars + SLA gates), tasks.md (15 tasks), checklist.md (130+ checkpoints)
+
+## Key Facts
+- **11 port interfaces** in `core/ports.ts` — orchestrator never imports concrete adapters
+- **8-step pipeline** — session hydrate → cache → contact → graph → agent → sanitize → cache store → session append
+- **4-tier fallback** — Gemini → DeepSeek → Ollama (local, conditional) → cached response
+- **19-rule AST firewall** — `bun check` blocks build on violations. 7 domains (Zod, Error, Query, AI, Telemetry, Type, Architecture).
+- **Health on :8280** — `/health` (liveness) + `/ready` (degradation status)
+- **bun test** — unit + contract tests, `__tests__/` next to code, zero dependencies
+- **bun run validate** — pre-commit pipeline (firewall + RAG triad + latency + SLA gates)

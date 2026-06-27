@@ -123,7 +123,8 @@ Orchestrator.processIntent(intent)
         ├──[9] Agent generation: IAgentProvider.generate(context, tools)
         │         └── Circuit breaker: MastraAgentProvider (Gemini)
         │         └── OPEN → fallback: DeepSeekFallbackProvider
-        │         └── BOTH FAIL → cached response with { degraded: true }
+        │         └── OPEN → fallback: OllamaLocalProvider (if LOCAL_LLM_URL set)
+        │         └── ALL DEAD → cached response with { degraded: true }
         │
         ├──[10] Sanitization: validateAndFilterOutput(raw)
         │         └── Strip PII, enforce length, validate structure (Rule 10)
@@ -220,8 +221,8 @@ Operator opens apps/web/ in browser
                     ▼                ▼                 ▼
           ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐
           │  Supabase   │  │  Neo4j      │  │  Gemini/DeepSeek│
-          │  (pgvector) │  │  AuraDB     │  │  (AI models)    │
-          │  + RLS      │  │  Free 200MB │  │                 │
+          │  (pgvector) │  │  AuraDB     │  │  + Ollama(local)│
+          │  + RLS      │  │  Free 200MB │  │  (AI models)    │
           └──────┬──────┘  └──────┬──────┘  └────────┬────────┘
                  │                │                   │
                  ▼                ▼                   ▼
@@ -285,7 +286,8 @@ Adapter call
             Neo4j down       → NoOpGraphRetriever (empty context)
             Gemini embed down → CachedEmbeddingProvider (last-known embedding)
             Gemini gen down   → DeepSeekFallbackProvider
-            Both AI down      → cached response + { degraded: true }
+            Both cloud down   → OllamaLocalProvider (conditional, $0)
+            All AI dead        → cached response + { degraded: true }
             Redis down        → SupabaseIdempotencyStore (idempotency_keys table)
             Both idemp. down  → at-least-once (process anyway, availability > consistency)
 ```
@@ -369,6 +371,12 @@ Adapter call
                     │  Grafana    │  50GB traces, 10K metrics, 14d retention
                     │  Cloud      │  Ceiling: 2000 series, 5GB traces, 2GB logs
                     └──────┬──────┘
+                           │
+                    ┌──────────────┐
+                    │  Ollama      │  Your hardware (RAM/GPU)
+                    │  (local)     │  $0 — third-tier fallback only
+                    │  Optional    │  7B model ~8GB RAM
+                    └──────┬───────┘
                            │
                     ┌──────▼──────┐
                     │  LiveKit    │  50GB/month

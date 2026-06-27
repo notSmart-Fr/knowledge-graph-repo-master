@@ -39,8 +39,8 @@ export class GraphTraversalError extends IntegrationError {
 }
 
 export class CacheError extends IntegrationError {
-  constructor(message: string, meta?: Record<string, unknown>) {
-    super("CACHE_ERROR", message, meta);
+  constructor(code: string, message: string, meta?: Record<string, unknown>) {
+    super(code, message, meta);
     this.name = "CacheError";
   }
 }

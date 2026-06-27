@@ -36,6 +36,10 @@
   - [ ] `parseEnv()` validates at import time, crashes on missing required keys
 - [ ] Task 1.7: Create barrel export (`index.ts`)
   - [ ] Re-export ports, errors, logger, sanitize, env schema
+- [ ] Task 1.8: Add core unit tests (`bun test`)
+  - [ ] `core/__tests__/sanitize.test.ts` — PII stripping: phone numbers, emails → [REDACTED]
+  - [ ] `core/__tests__/errors.test.ts` — IntegrationError strips PII keys from meta
+  - [ ] `core/__tests__/logger.test.ts` — JSON output structure, PII keys excluded from meta
 
 ## Task 2: Adapters — Supabase + Neo4j + AI + Messaging
 - [ ] Task 2.1: Build Supabase CRM adapters (`adapters/supabase/`)
@@ -47,9 +51,9 @@
   - [ ] All return types validated with Zod
   - [ ] All Supabase calls behind auth context (service_role for backend)
 - [ ] Task 2.2: Build pgvector cache adapter (`adapters/supabase/pgvector-cache.ts`)
-  - [ ] `PgVectorCache` implements `ICacheStore`
-  - [ ] `check(embedding)` uses `<=>` operator with threshold 0.05
-  - [ ] `store(embedding, response)` inserts with Zod-validated response shape
+  - [x] `PgVectorCache` implements `ICacheStore`
+  - [x] `check(embedding)` uses `<=>` operator with threshold 0.05 (operator inside `match_cache_embeddings` RPC, documented in source for Rule 9 compliance)
+  - [x] `store(embedding, response)` inserts with Zod-validated response shape; hashes response text as `prompt_hash` for content-addressable dedup; table: `public.cache_embeddings`
   - [ ] Cache bypass logic: "urgent", "emergency" tokens
 - [ ] Task 2.3: Build Neo4j graph retriever (`adapters/neo4j/`)
   - [ ] `Neo4jGraphRetriever` implements `IGraphRetriever`
@@ -62,21 +66,26 @@
   - [ ] `NoOpGraphRetriever` implements `IGraphRetriever`
   - [ ] All methods return empty `CRMGraphContext` — used when Neo4j circuit is open
 - [ ] Task 2.5: Build AI adapters (`adapters/ai/`)
-  - [ ] `GeminiEmbeddingProvider` implements `IEmbeddingProvider`
-    - [ ] `embed(text)` → 768-dim float32[]
-    - [ ] `embedBatch(texts[])` → float32[][]
-    - [ ] Zod validation on API response
+  - [x] `GeminiEmbeddingProvider` implements `IEmbeddingProvider`
+    - [x] `embed(text)` → 768-dim float32[]
+    - [x] `embedBatch(texts[])` → float32[][]
+    - [x] Zod validation on API response
     - [ ] Retry with exponential backoff on 429/5xx
   - [ ] `CachedEmbeddingProvider` implements `IEmbeddingProvider`
     - [ ] Returns last-known embedding from local cache when Gemini is down
     - [ ] Uses `ENCRYPTION_MASTER_KEY` for cache encryption at rest
-  - [ ] `MastraAgentProvider` implements `IAgentProvider`
-    - [ ] `generate(context, tools)` → calls Mastra agent
+  - [x] `MastraAgentProvider` implements `IAgentProvider`
+    - [x] `generate(context, tools)` → calls Gemini generateContent API directly
     - [ ] `generateStream(context, tools)` → streaming variant for voice
-    - [ ] Falls back to DeepSeek if Gemini generation fails
-  - [ ] `DeepSeekFallbackProvider` implements `IAgentProvider`
-    - [ ] Wraps DeepSeek as secondary AI provider
-    - [ ] Used when Geminis circuit breaker is open
+    - [x] Falls back to DeepSeek if Gemini generation fails
+  - [x] `DeepSeekFallbackProvider` implements `IAgentProvider`
+    - [x] Wraps DeepSeek as secondary AI provider
+    - [x] Used when Gemini's circuit breaker is open
+  - [x] `OllamaLocalProvider` implements `IAgentProvider`
+    - [x] Calls local Ollama REST API (`POST /api/generate`) as third-tier fallback
+    - [x] Activated when BOTH Gemini and DeepSeek circuits are open
+    - [x] Zero API cost — makes AI generation 100% free at fallback tier
+    - [x] Only included in fallback chain when `LOCAL_LLM_URL` env var is set
 - [ ] Task 2.6: Build messaging adapters (`adapters/messaging/`)
   - [ ] `RedisIdempotencyStore` implements `IIdempotencyStore`
     - [ ] `checkAndSet(key, ttl)` using `SET NX EX`
@@ -85,6 +94,11 @@
     - [ ] Uses `idempotency_keys` table with TTL cleanup
   - [ ] `BullMQDeadLetterQueue` implements `IDeadLetterQueue`
     - [ ] `enqueue(queue, job, errorMeta)` → moves failed job to `dlq:{queue}:*` with metadata
+- [ ] Task 2.7: Add adapter contract tests (`bun test`)
+  - [ ] `adapters/supabase/__tests__/store-contracts.test.ts` — all 5 stores implement their interfaces, return Zod-valid types
+  - [ ] `adapters/neo4j/__tests__/retriever-contracts.test.ts` — both retrievers implement `IGraphRetriever`
+  - [ ] `adapters/ai/__tests__/provider-contracts.test.ts` — all 4 providers implement their interfaces
+  - [ ] `adapters/messaging/__tests__/messaging-contracts.test.ts` — idempotency store + DLQ implement interfaces
 
 ## Task 3: Database Schema — Supabase Migrations + RLS
 - [ ] Task 3.1: Write migration for CRM tables
@@ -164,6 +178,9 @@
   - [ ] When `IAgentProvider` (primary) circuit is open → inject `DeepSeekFallbackProvider`
   - [ ] When both AI providers fail → return cached response if available, else error
   - [ ] Degradation path logged at WARN level; user-facing response never says "degraded"
+- [ ] Task 5.5: Add orchestrator + circuit breaker tests (`bun test`)
+  - [ ] `core/__tests__/circuit-breaker.test.ts` — 3 failures → open, cooldown → half-open, success → closed
+  - [ ] `core/__tests__/orchestrator.test.ts` — mock all 11 ports, verify pipeline steps called in order
 
 ## Task 6: PII Field Encryption
 - [ ] Task 6.1: Build encryption module (`adapters/encryption/field-encryption.ts`)
@@ -177,6 +194,8 @@
   - [ ] `SupabaseCallStore`: encrypt/decrypt `transcript_json` on write/read
   - [ ] `SupabaseSessionStore` (new): encrypt/decrypt `messages` on write/read
   - [ ] Encryption is transparent to the caller — stores expose same interface
+- [ ] Task 6.3: Add encryption unit test (`bun test`)
+  - [ ] `adapters/encryption/__tests__/field-encryption.test.ts` — encrypt → decrypt roundtrip, different salts produce different ciphertexts, rotateKey works
 
 ## Task 7: AI CRM Agents (Mastra)
 - [ ] Task 7.1: Build CRM agent (`agents/crm-agent.ts`)
@@ -215,6 +234,8 @@
   - [ ] `checkGemini()` — cached from startup, re-validated every 60s
   - [ ] `checkCircuitBreakers()` — all closed or half-open → healthy; any open → degraded
   - [ ] Each check writes result to `health_checks` table in Supabase
+- [ ] Task 8.4: Add health endpoint test (`bun test`)
+  - [ ] `health/__tests__/health.test.ts` — GET /health returns 200, GET /ready returns 503 when adapters are down
 
 ## Task 9: Seed Data + Neo4j Ingestion
 - [ ] Task 9.1: Build Supabase seed script (`scripts/seed.ts`)

@@ -42,7 +42,7 @@ This document maps every requirement in our AI CRM spec to the enforcement mecha
 | Requirement | AST Coverage | Notes |
 |---|---|---|
 | Hybrid hexagonal architecture: Orchestrator depends only on port interfaces (core/ports.ts), never concrete adapters | 🟢 Full | Rule16 enforces NO direct adapter instantiation in core/ directory |
-| All network boundaries must be wrapped in Zod schema parse (fetch, webhook, realtime, websocket) | 🟢 Full | Rule3 (fetch) + Rule18 (Supabase Realtime .on()) |
+| All network boundaries must be wrapped in Zod schema parse (fetch, webhook, realtime, websocket) | 🟢 Full | Rule3 (fetch — ancestor + sibling-parse fallback) + Rule18 (Supabase Realtime .on()) |
 | AI output must pass through sanitizer (validateAndFilterOutput / sanitizeOutput) before storage or return | 🟡 Partial | Rule10 enforces sanitizer exists in file with AI output; cannot verify sanitizer correctness |
 | Port interfaces exist for all adapters (IContactStore, IDealStore, ICallStore, ITicketStore, IAccountStore, IGraphRetriever, IEmbeddingProvider, IAgentProvider, ICacheStore, IIdempotencyStore, IDeadLetterQueue) | 🔴 None | File existence check possible, but not structural (not needed since we build them from scratch) |
 | All exported Zod schemas must have constraints (.max() on strings, .min() + .max() on numbers) | 🟢 Full | Rule1 |

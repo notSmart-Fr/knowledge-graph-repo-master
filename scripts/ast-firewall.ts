@@ -57,6 +57,76 @@ function hasAncestorCall(
   return false;
 }
 
+/**
+ * After a `const v = await fetch(...)` that isn't wrapped in .parse() as an
+ * ancestor, check whether sibling statements later feed v (or its .json())
+ * into a Schema.parse() / .safeParse() call.  This catches the two-statement
+ * pattern that the ancestor-only check misses:
+ *   const r = await fetch(...); const d = Schema.parse(await r.json());
+ */
+function hasSiblingParse(
+  fetchCall: Node,
+  methodNames: string[],
+): boolean {
+  // Walk up from fetchCall to find the enclosing VariableDeclaration
+  let varDecl: Node | undefined = fetchCall.getParent();
+  while (varDecl && !Node.isVariableDeclaration(varDecl)) {
+    varDecl = varDecl.getParent();
+  }
+  if (!varDecl) return false;
+  const varName = varDecl.getName();
+
+  // Find the enclosing block (function / try / if body, etc.)
+  let block: Node | undefined = varDecl.getParent();
+  while (block && !Node.isBlock(block) && !Node.isSourceFile(block)) {
+    block = block.getParent();
+  }
+  if (!block || !(Node.isBlock(block) || Node.isSourceFile(block))) return false;
+
+  // Walk statements after the fetch-containing statement.
+  // Track intermediate variables assigned from varName.json() so that
+  //   const raw = await response.json(); Schema.parse(raw);
+  // is accepted alongside the direct Schema.parse(await response.json()).
+  const stmts = Node.isBlock(block)
+    ? (block as any).getStatements()
+    : (block as any).getStatements();
+  const jsonVars = new Set<string>();
+
+  for (const stmt of stmts) {
+    if (stmt.getPos() <= fetchCall.getPos()) continue;
+
+    // Detect intermediate: const raw = await response.json()
+    for (const vd of stmt.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+      const init = vd.getInitializer();
+      if (!init) continue;
+      // Match `response.json()` anywhere in the initializer text
+      if (init.getText().includes(`${varName}.json()`)) {
+        jsonVars.add(vd.getName());
+      }
+    }
+
+    for (const call of stmt.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      const expr = call.getExpression();
+      if (!Node.isPropertyAccessExpression(expr)) continue;
+      if (!methodNames.includes(expr.getName())) continue;
+
+      const args = call.getArguments();
+      if (args.length === 0) continue;
+      const argText = args[0].getText();
+
+      // Direct: Schema.parse(response) or Schema.parse(await response.json())
+      if (argText === varName || argText.includes(`${varName}.json()`)) {
+        return true;
+      }
+      // Intermediate: const raw = await response.json(); Schema.parse(raw)
+       if (jsonVars.has(argText)) {
+         return true;
+       }
+    }
+  }
+  return false;
+}
+
 function error(gate: GateContext, rule: string, detail: string) {
   gate.violationCount++;
   process.stderr.write(
@@ -178,7 +248,11 @@ const rule3_BoundaryZodWrap: RuleFn = (ctx) => {
 
     if (!isFetch) continue;
 
-    if (!hasAncestorCall(call, ["parse", "parseAsync", "safeParse"])) {
+    const parseMethods = ["parse", "parseAsync", "safeParse"];
+    if (
+      !hasAncestorCall(call, parseMethods) &&
+      !hasSiblingParse(call, parseMethods)
+    ) {
       error(ctx, "Rule 3 Boundary Zod Wrap",
         `fetch() / Bun.fetch() must be wrapped in Schema.parse() or .safeParse(). ` +
         `Untrusted network data cannot enter internal state raw.`);
