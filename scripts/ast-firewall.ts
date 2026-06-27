@@ -1,3 +1,4 @@
+// @ts-nocheck — IDE TS is 6.x, ts-morph is built against 5.x. Runs via `bun run`, not `tsc`.
 /**
  * AST Security Firewall v3 — 19 Rules, 7 Domains
  *
@@ -127,11 +128,32 @@ function hasSiblingParse(
   return false;
 }
 
+// ── Violation collection (sorted output) ──────────────────────────────
+
+interface Violation {
+  rule: string;
+  path: string;
+  detail: string;
+  ruleNum: number;
+}
+
+const violations: Violation[] = [];
+
 function error(gate: GateContext, rule: string, detail: string) {
   gate.violationCount++;
-  process.stderr.write(
-    `❌ ${rule} in [${gate.relativePath}]:\n   ${detail}\n`,
-  );
+  const m = rule.match(/^Rule (\d+)/);
+  const ruleNum = m ? parseInt(m[1], 10) : 99;
+  violations.push({ rule, path: gate.relativePath, detail, ruleNum });
+}
+
+function flushViolations() {
+  violations.sort((a, b) => a.ruleNum - b.ruleNum);
+  for (const v of violations) {
+    process.stderr.write(
+      `❌ ${v.rule} in [${v.path}]:\n   ${v.detail}\n`,
+    );
+  }
+  violations.length = 0; // reset for next sweep
 }
 
 // ── Scan target resolution ───────────────────────────────────────────────
@@ -243,8 +265,13 @@ const rule2_AntiCheat: RuleFn = (ctx) => {
 
 const rule3_BoundaryZodWrap: RuleFn = (ctx) => {
   for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const exprText = call.getExpression().getText();
-    const isFetch = exprText === "fetch" || exprText.endsWith(".fetch") || exprText === "Bun.fetch";
+    const expr = call.getExpression();
+    const exprText = expr.getText();
+
+    // ponytail: catch any fetch call — direct, property-access (.fetch), or Bun.fetch variants
+    const isFetch = exprText === "fetch"
+      || exprText.endsWith(".fetch")
+      || (Node.isPropertyAccessExpression(expr) && expr.getName() === "fetch");
 
     if (!isFetch) continue;
 
@@ -261,26 +288,45 @@ const rule3_BoundaryZodWrap: RuleFn = (ctx) => {
 };
 
 const rule18_WebSocketBoundary: RuleFn = (ctx) => {
-  if (!/\.on\(/.test(ctx.fileText)) return;
+  // ponytail: check for any realtime/websocket subscription pattern — not just .on()
+  const hasRealtime = /\.on\(|\.subscribe\(/.test(ctx.fileText);
+  if (!hasRealtime) return;
 
   for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = call.getExpression();
     if (!Node.isPropertyAccessExpression(expr)) continue;
-    if (expr.getName() !== "on") continue;
+    const methodName = expr.getName();
+    if (methodName !== "on" && methodName !== "subscribe") continue;
 
     const args = call.getArguments();
-    const callback = args[args.length - 1];
+    // .on("event", callback) or .subscribe(callback) — find the last function arg
+    const callback = [...args].reverse().find(a =>
+      Node.isArrowFunction(a) || Node.isFunctionExpression(a)
+    );
     if (!callback) continue;
 
-    const callbackText = callback.getText();
+    // Use AST traversal on the body — NEVER regex on text (comments contain false positives)
+    const body = (callback as any).getBody?.();
+    if (!body) continue;
 
-    // Only flag handlers accessing payload/data/message/text without Zod parse
-    if (!/payload|data|message|text|event|body/.test(callbackText)) continue;
-    if (/\.(parse|parseAsync|safeParse)\(/.test(callbackText)) continue;
+    const bodyText = body.getText();
+    if (!/payload|data|message|text|event|body/.test(bodyText)) continue;
 
-    error(ctx, "Rule 18 WebSocket Boundary",
-      `WebSocket/realtime event handler ".on()" must Zod.parse() untrusted incoming payload. ` +
-      `Untrusted WebSocket data cannot enter internal state raw — same as fetch() boundary.`);
+    // AST-based parse detection — catches both property access and destructured calls
+    const parseCalls = body.getDescendantsOfKind(SyntaxKind.CallExpression);
+    const hasZodParse = parseCalls.some(c => {
+      const ce = c.getExpression();
+      if (Node.isPropertyAccessExpression(ce)) {
+        return ["parse", "parseAsync", "safeParse"].includes(ce.getName());
+      }
+      return ["parse", "parseAsync", "safeParse"].includes(ce.getText());
+    });
+
+    if (!hasZodParse) {
+      error(ctx, "Rule 18 WebSocket Boundary",
+        `WebSocket/realtime handler ".${methodName}()" must Zod.parse() untrusted incoming payload. ` +
+        `Untrusted WebSocket data cannot enter internal state raw — same as fetch() boundary.`);
+    }
   }
 };
 
@@ -362,7 +408,7 @@ const rule5_DataErrorPII: RuleFn = (ctx) => {
   for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = call.getExpression();
     const isConsoleError = expr.getText() === "console.error";
-    
+
     let isLoggerCall = false;
     if (Node.isPropertyAccessExpression(expr)) {
       const base = expr.getExpression().getText();
@@ -374,11 +420,38 @@ const rule5_DataErrorPII: RuleFn = (ctx) => {
 
     if (!isConsoleError && !isLoggerCall) continue;
 
+    const loggerType = isConsoleError ? "console.error"
+      : `logger.${(expr as any).getName?.() ?? "?"}`;
+
     for (const arg of call.getArguments()) {
+      // Identifier references: console.error(email) where email is a PII-named var
       if (Node.isIdentifier(arg) && piiPattern.test(arg.getText())) {
-        const loggerType = isConsoleError ? "console.error" : `logger.${expr.getName()}`;
         error(ctx, "Rule 5 Error PII",
           `${loggerType} must not pass unvetted PII identifier "${arg.getText()}".`);
+      }
+
+      // String literals containing PII-looking content
+      if (Node.isStringLiteral(arg)) {
+        const val = arg.getLiteralValue();
+        if (typeof val === "string" && piiPattern.test(val)) {
+          // ponytail: only flag if the literal looks like actual data, not a key name
+          if (val.length > 3) {
+            error(ctx, "Rule 5 Error PII",
+              `${loggerType} must not pass string literal that looks like PII: "${val.slice(0, 40)}..."`);
+          }
+        }
+      }
+
+      // Object literals: check property names (not values, too expensive to track)
+      if (Node.isObjectLiteralExpression(arg)) {
+        for (const prop of arg.getProperties()) {
+          if (!Node.isPropertyAssignment(prop) && !Node.isShorthandPropertyAssignment(prop)) continue;
+          const propName = Node.isPropertyAssignment(prop) ? prop.getName() : prop.getName();
+          if (piiPattern.test(propName)) {
+            error(ctx, "Rule 5 Error PII",
+              `${loggerType} object has PII property name "${propName}" — use structural attributes only.`);
+          }
+        }
       }
     }
   }
@@ -388,8 +461,9 @@ const rule6_GracefulShutdown: RuleFn = (ctx) => {
   const hasExit = /process\.exit\(|Bun\.exit\(/.test(ctx.fileText);
   if (!hasExit) return;
 
-  const hasSigterm = /process\.on\(["']SIGTERM["']/.test(ctx.fileText);
-  const hasSigint = /process\.on\(["']SIGINT["']/.test(ctx.fileText);
+  // ponytail: check both process.on and process.once
+  const hasSigterm = /process\.on(?:ce)?\(["']SIGTERM["']/.test(ctx.fileText);
+  const hasSigint = /process\.on(?:ce)?\(["']SIGINT["']/.test(ctx.fileText);
 
   if (!(hasSigterm && hasSigint)) {
     error(ctx, "Rule 6 Graceful Shutdown",
@@ -399,7 +473,11 @@ const rule6_GracefulShutdown: RuleFn = (ctx) => {
 };
 
 const rule17_CircuitBreaker: RuleFn = (ctx) => {
-  if (!ctx.normalizedPath.includes("/core/orchestrator")) return;
+  // ponytail: pattern match — catches orchestrator/, orchestrator.ts, orchestrator-v2.ts, etc.
+  // Also catches apps/core/orchestrator and nested core/orchestrator/** variants.
+  const isOrchestrator = ctx.normalizedPath.includes("/core/") &&
+    /orchestrator/i.test(ctx.normalizedPath);
+  if (!isOrchestrator) return;
 
   const hasCircuitBreakerImport = /withCircuitBreaker|CircuitBreaker|breaker\./.test(ctx.fileText);
   if (!hasCircuitBreakerImport) {
@@ -444,33 +522,34 @@ const rule17_CircuitBreaker: RuleFn = (ctx) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const rule7_Neo4jParameterized: RuleFn = (ctx) => {
-  if (!ctx.fileText.includes("session.run") && !ctx.fileText.includes("tx.run")) return;
+  // ponytail: check for any Neo4j session/tx method that runs cypher — not just .run()
+  const hasNeo4jQuery = /session\.(?:run|executeRead|executeWrite)\b|tx\.(?:run|executeRead|executeWrite)\b/.test(ctx.fileText);
+  if (!hasNeo4jQuery) return;
 
-  // Find .run() calls
+  // Find .run() / .executeRead() / .executeWrite() calls
   for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = call.getExpression();
     if (!Node.isPropertyAccessExpression(expr)) continue;
-    if (expr.getName() !== "run") continue;
+    const methodName = expr.getName();
+    if (!["run", "executeRead", "executeWrite"].includes(methodName)) continue;
 
     // First arg is the Cypher string
     const args = call.getArguments();
     if (args.length === 0) continue;
 
     const firstArg = args[0];
-    const firstArgText = firstArg.getText();
 
-    // Template literal with interpolation = danger
+    // Template literal with interpolation = danger (any interpolation is JS injection)
     if (firstArg.getKind() === SyntaxKind.TemplateExpression) {
       const spans = (firstArg as any).getTemplateSpans?.() || [];
       for (const span of spans) {
         const exprText = span.getExpression().getText();
-        // Parameters like { key } in template literals are captured as expressions
-        // The span expression is the interpolation — if it's not just a param reference, flag it
-        if (exprText && !/^\s*params\.\w+\s*$/.test(exprText) && !/^\s*\w+\s*$/.test(exprText)) {
-          // This is suspicious inline interpolation
+        if (exprText) {
+          // ponytail: any interpolation in a Cypher template literal is injection risk.
+          // Users MUST use $param placeholders and pass params as second argument.
           error(ctx, "Rule 7 Neo4j Parameterized",
-            `Cypher query uses string interpolation (template literal with \${...}). ` +
-            `Use parameterized queries: session.run(query, { key: value }).`);
+            `Cypher query uses string interpolation (\${${exprText.slice(0, 30)}}). ` +
+            `Use $parameterized Cypher queries: session.run("MATCH ... WHERE n.id = $id", { id: value }).`);
           break;
         }
       }
@@ -580,19 +659,31 @@ const rule10_OutputSanitization: RuleFn = (ctx) => {
   }
   if (!hasAIOutput) return;
 
-  if (
-    !ctx.fileText.includes("validateAndFilterOutput") &&
-    !ctx.fileText.includes("sanitizeOutput")
-  ) {
+  // ponytail: naming-convention based — any function call or import containing sanitize/validate/filter
+  const hasSanitizer = /\b(sanitize|validate|filter)\w*(Output|Response|Result|Content)\b/i.test(ctx.fileText);
+  if (!hasSanitizer) {
     error(ctx, "Rule 10 Output Sanitization",
-      `AI output (streamText/generateText/agent.generate) must be sanitized with ` +
-      `"validateAndFilterOutput" or "sanitizeOutput" before storage or user-facing return.`);
+      `AI output (streamText/generateText/agent.generate) must be sanitized before storage or user-facing return. ` +
+      `Expected a function matching *sanitize*, *validate*, or *filter* before returning AI output.`);
   }
 };
 
 const rule11_MastraToolContract: RuleFn = (ctx) => {
+  // ponytail: track imported "createTool" identifiers to catch aliases like
+  // `import { createTool as makeTool }` — getText() returns "makeTool", not "createTool"
+  const createToolAliases = new Set<string>();
+  for (const imp of ctx.sourceFile.getImportDeclarations()) {
+    for (const named of imp.getNamedImports()) {
+      if (named.getNameNode().getText() === "createTool") {
+        createToolAliases.add(named.getAliasNode()?.getText() ?? "createTool");
+      }
+    }
+  }
+  // Also catch global/ambient createTool
+  createToolAliases.add("createTool");
+
   for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    if (call.getExpression().getText() !== "createTool") continue;
+    if (!createToolAliases.has(call.getExpression().getText())) continue;
     const args = call.getArguments();
     if (args.length === 0 || !Node.isObjectLiteralExpression(args[0])) continue;
 
@@ -679,6 +770,15 @@ const rule13_SpanPIIGuard: RuleFn = (ctx) => {
         `OpenTelemetry span attribute "${keyVal}" contains PII. ` +
         `Span attributes are exported to telemetry backends and are permanently queryable.`);
     }
+
+    // Value check: if value references a PII-named variable
+    if (args.length >= 2) {
+      const valText = args[1].getText();
+      if (Node.isIdentifier(args[1]) && piiKeys.test(valText)) {
+        error(ctx, "Rule 13 Span PII Guard",
+          `span.setAttribute("${keyVal}", ${valText}) — value references PII variable "${valText}".`);
+      }
+    }
   }
 
   // Check addEvent attributes
@@ -700,6 +800,15 @@ const rule13_SpanPIIGuard: RuleFn = (ctx) => {
         error(ctx, "Rule 13 Span PII Guard",
           `OpenTelemetry span addEvent attribute "${propName}" contains PII. ` +
           `Event attributes are exported to telemetry backends and are permanently queryable.`);
+      }
+
+      // Value check for property assignments
+      if (Node.isPropertyAssignment(prop)) {
+        const val = prop.getInitializer();
+        if (val && Node.isIdentifier(val) && piiKeys.test(val.getText())) {
+          error(ctx, "Rule 13 Span PII Guard",
+            `addEvent attribute "${propName}" value references PII variable "${val.getText()}".`);
+        }
       }
     }
   }
@@ -730,7 +839,14 @@ const rule14_SpanCoverage: RuleFn = (ctx) => {
     const bodyText = body.getText();
 
     // Only require spans if function calls external services
-    const callsExternal = /fetch\(|session\.run\(|tx\.run\(|supabase\.|redis\.|createCipheriv\(/.test(bodyText);
+    // ponytail: naming-convention based — catch any adapter/service call pattern
+    const callsExternal =
+      /fetch\(/.test(bodyText) ||                             // any fetch() variant
+      /\.(run|executeRead|executeWrite)\(/.test(bodyText) ||  // Neo4j session/tx methods
+      /\.(from|rpc|channel|removeSubscription)\(/.test(bodyText) || // Supabase client
+      /createCipheriv\(/.test(bodyText) ||                    // crypto
+      /\.(send|publish|subscribe)\(/.test(bodyText) ||        // messaging
+      /\.(generate|stream|generateText|streamText)\(/.test(bodyText); // AI
     if (!callsExternal) continue;
 
     if (!bodyText.includes("startActiveSpan")) {
@@ -748,13 +864,16 @@ const rule14_SpanCoverage: RuleFn = (ctx) => {
 const rule15_NoAny: RuleFn = (ctx) => {
   // Variables / parameters with explicit : any
   for (const node of [
-    ...ctx.sourceFile.getDescendantsOfKind(SyntaxKind.Parameter),
+    ...ctx.sourceFile.getDescendantsOfKind(SyntaxKind.ParameterDeclaration),
     ...ctx.sourceFile.getDescendantsOfKind(SyntaxKind.VariableDeclaration),
+    ...ctx.sourceFile.getDescendantsOfKind(SyntaxKind.PropertyDeclaration),
+    ...ctx.sourceFile.getDescendantsOfKind(SyntaxKind.PropertySignature),
   ]) {
     const typeNode = node.getTypeNode();
     if (typeNode && typeNode.getKind() === SyntaxKind.AnyKeyword) {
+      const name = (node as any).getName?.() || "(anonymous)";
       error(ctx, "Rule 15 No Any",
-        `Explicit "any" type on "${node.getName()}" — use a specific type or "unknown".`);
+        `Explicit "any" type on "${name}" — use a specific type or "unknown".`);
     }
   }
 
@@ -768,14 +887,18 @@ const rule15_NoAny: RuleFn = (ctx) => {
     }
   }
 
-  // Return types containing any
+  // Return types containing any — use AST traversal, not regex
   for (const fn of [
     ...ctx.sourceFile.getDescendantsOfKind(SyntaxKind.FunctionDeclaration),
     ...ctx.sourceFile.getDescendantsOfKind(SyntaxKind.ArrowFunction),
     ...ctx.sourceFile.getDescendantsOfKind(SyntaxKind.MethodDeclaration),
   ]) {
     const returnType = fn.getReturnTypeNode();
-    if (returnType && /\bany\b/.test(returnType.getText())) {
+    if (!returnType) continue;
+    if (
+      returnType.getKind() === SyntaxKind.AnyKeyword ||
+      returnType.getDescendantsOfKind(SyntaxKind.AnyKeyword).length > 0
+    ) {
       error(ctx, "Rule 15 No Any",
         `Return type containing "any" — use a specific type.`);
     }
@@ -798,19 +921,23 @@ const rule15_NoAny: RuleFn = (ctx) => {
 const rule16_PortInjection: RuleFn = (ctx) => {
   if (!ctx.normalizedPath.includes("/core/")) return;
 
-  const adapterConstructors = [
-    "SupabaseContactStore", "SupabaseDealStore", "SupabaseCallStore",
-    "SupabaseTicketStore", "SupabaseAccountStore",
-    "Neo4jGraphRetriever", "NoOpGraphRetriever",
-    "GeminiEmbeddingProvider", "CachedEmbeddingProvider",
-    "MastraAgentProvider", "DeepSeekFallbackProvider",
-    "RedisIdempotencyStore", "SupabaseIdempotencyStore",
-    "BullMQDeadLetterQueue", "FieldEncryption",
-  ];
+  // ponytail: naming-convention based detection instead of hardcoded list.
+  // Catches new adapters automatically — any constructor ending in Store, Provider, Retriever,
+  // or containing "Adapter" / "Encrypt" signals a concrete adapter.
+  // Also catches well-known adapter prefixes (Supabase*, Neo4j*, Gemini*, etc.).
+  const isAdapterName = (name: string): boolean => {
+    if (/^(Supabase|Neo4j|NoOp|Gemini|Cached|Mastra|DeepSeek|Redis|BullMQ|Ollama|Field|LiveKit|Cartesia|Deepgram)/.test(name)) return true;
+    if (name.endsWith("Store") || name.endsWith("Provider") || name.endsWith("Retriever")) return true;
+    if (name.endsWith("FallbackProvider") || name.endsWith("AgentProvider") || name.endsWith("EmbeddingProvider")) return true;
+    if (name.includes("Adapter") || name.includes("Encrypt")) return true;
+    return false;
+  };
 
   for (const ne of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.NewExpression)) {
     const ctorName = ne.getExpression().getText();
-    if (adapterConstructors.includes(ctorName)) {
+    // Skip native/built-in constructors
+    if (/^(Error|Map|Set|Array|Object|Date|Promise|URL|RegExp|Buffer|AbortController|FormData|Headers|Request|Response|TextEncoder|TextDecoder|WeakMap|WeakSet)$/.test(ctorName)) continue;
+    if (isAdapterName(ctorName)) {
       error(ctx, "Rule 16 Port Injection",
         `Direct instantiation of "${ctorName}" in core/ — inject via ports instead (no new adapters in core).`);
     }
@@ -880,6 +1007,9 @@ async function executeSweep(targetPath?: string): Promise<boolean> {
 
     totalViolations.count += ctx.violationCount;
   }
+
+  // Flush sorted violations
+  flushViolations();
 
   const passed = totalViolations.count === 0;
 
