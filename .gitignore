@@ -69,3 +69,6 @@ Thumbs.db
 
 #mcp-codebase-memory-mcp
 install.ps1
+
+# Speckit / Gitspec framework internals
+.specify/

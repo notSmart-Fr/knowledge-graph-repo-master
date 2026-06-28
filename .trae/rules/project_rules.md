@@ -50,3 +50,12 @@ A report names a symptom. Grep every caller of the function you touch and fix th
 ## Non-Trivial Logic Leaves ONE Runnable Check
 
 Non-trivial logic leaves ONE runnable check behind — the smallest thing that fails if the logic breaks: an assert-based demo/self-check or one small test file. No frameworks, no fixtures. Trivial one-liners need no test.
+
+<!-- SPECKIT START -->
+**Active Plan**: `specs/001-ai-crm-core/plan.md`
+**Spec**: `specs/001-ai-crm-core/spec.md`
+**Constitution**: `.specify/memory/constitution.md`
+**Progress**: Tasks 1-4 complete (Core Kernel, Adapters, DB Schema, Feature Slices). Tasks 5-16 pending.
+
+For architecture decisions, data model, quickstart, and contracts, see `specs/001-ai-crm-core/`.
+<!-- SPECKIT END -->
