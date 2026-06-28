@@ -9,6 +9,7 @@
     "check:watch": "bun run scripts/ast-firewall.ts --watch",
     "check:chaos": "bun run scripts/ast-firewall.ts --chaos",
     "typecheck": "cd packages/ai-core && tsc --noEmit",
+    "test": "bun test packages/ai-core/src",
     "clean": "bun --eval \"const fs = require('fs'); ['packages/ai-core/dist', 'tsconfig.tsbuildinfo', 'packages/ai-core/tsconfig.tsbuildinfo'].forEach(p => { try { fs.rmSync(p, { recursive: true, force: true }) } catch {} })\"",
     "validate": "echo 'Validate pipeline — run after implementation is complete.'",
     "dev:web": "echo 'UI dashboard — run after Task 12 is complete.'",
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "typescript": "^6.0.3",
-    "@types/node": "^26.0.1"
+    "@types/node": "^26.0.1",
+    "@types/bun": "^1.3.0"
   }
 }

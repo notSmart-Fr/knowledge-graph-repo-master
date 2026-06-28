@@ -52,7 +52,9 @@ scripts/           — worker.ts, voice-agent.ts, seed.ts, ingest.ts, eval-rag.t
 - **Prefer existing patterns.** Check `code-map.md` and `architecture.md` in `.knowledge/` before writing new code.
 
 ## Spec Location
-`.trae/specs/production-grade-graphrag-core/` — spec.md (5 pillars + SLA gates), tasks.md (15 tasks), checklist.md (130+ checkpoints)
+`.trae/specs/production-grade-graphrag-core/spec.md` — Single system architecture spec with `tasks.md` (15 tasks) and `checklist.md` (130+ checkpoints). The spec is organized around 9 quality domains (ISO/IEC 25010 + Google SRE): 3 universal (API & Contract, Data & Storage, Error Handling) and 6 operational (Observability, Security, Deployment, Disaster Recovery, Developer Experience, Legal/Compliance).
+
+**Agent rule:** Before implementing any feature, read `spec.md` to understand the architecture contracts and the quality domain framework. Then read `tasks.md` for the ordered execution plan. Each task maps to specific checklist items for verification.
 
 ## Key Facts
 - **11 port interfaces** in `core/ports.ts` — orchestrator never imports concrete adapters

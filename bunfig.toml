@@ -13,6 +13,3 @@ packages = ["packages/*"]
 [run]
 # Bun runs TypeScript directly — no transpilation step needed
 bun = true
-
-[test]
-preload = []

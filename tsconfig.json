@@ -2,15 +2,16 @@
   "compilerOptions": {
     "strict": true,
     "target": "ESNext",
-    "module": "ESNext",
+    "module": "Preserve",
     "moduleResolution": "bundler",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "allowSyntheticDefaultImports": true,
     "jsx": "preserve",
-    "lib": ["ESNext", "DOM"]
+    "lib": ["ESNext", "DOM"],
+    "types": ["bun"]
   },
   "include": ["packages/**/*"],
-  "exclude": ["node_modules", "packages/**/node_modules", "packages/**/__chaos__", "packages/**/__tests__", "scripts"]
+  "exclude": ["node_modules", "packages/**/node_modules", "packages/**/__chaos__", "scripts"]
 }
