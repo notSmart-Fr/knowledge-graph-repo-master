@@ -8,6 +8,16 @@
 
 **Input**: User description: "Production-grade AI CRM with hybrid hexagonal architecture — converged WhatsApp, voice, and web dashboard through an AI orchestrator with graceful degradation, PII security, and free-tier budget awareness."
 
+## Clarifications
+
+### Session 2026-06-28
+
+- Q: What are the valid deal stage transition rules? → A: Forward-only with skips — deals can advance any number of stages forward (e.g., discovery → proposal), but never move backward and never reopen from closed_won or closed_lost.
+- Q: When does GDPR/DSAR compliance activate? → A: Feature-flagged for later — data model and encryption architecture support DSAR from day one, but retrieval/erasure endpoints are gated behind `DSAR_ENABLED=true` env var for future activation.
+- Q: What is the post-launch scalability target? → A: 10x seed data (250 contacts, 150 deals, 80 calls, 50 tickets). Fits within all free-tier limits without sharding or distributed systems. Architecture must support pagination on all list endpoints and sparse graph traversal.
+- Q: How are concurrent edits to the same entity resolved? → A: Last-write-wins — most recent update replaces without conflict detection. Rare at under-10-agent scale. Optimistic locking can be added later if conflicts become measurable.
+- Q: What are the valid ticket status transition rules? → A: Forward flow with one reopen — statuses flow open → in_progress → resolved → closed. Only `closed` can return to `in_progress` (customer reopen). `resolved` stays resolved. No other backwards movement.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Sales Agent Handles Customer via WhatsApp (Priority: P1)
@@ -109,6 +119,7 @@ An admin reviews audit logs, verifies sensitive data encryption is active, and c
 - What happens when ALL data sources (primary database and knowledge graph) are simultaneously unavailable on the dashboard? The dashboard shows a single "Service Unavailable" status bar with the last-known healthy timestamp. Individual panels remain empty — no spinner, no error popup, no white screen.
 - What happens when a known contact has zero deals, zero tickets, and zero calls (bare contact)? The AI response references the contact by name, states the account health if available, and offers help. No hallucinated data about non-existent deals or tickets.
 - What happens when a WhatsApp contact exceeds 5 messages in 10 seconds (rate limit)? Messages beyond the rate limit receive a 429 response via the webhook acknowledgment. Legitimate messages within the limit continue processing normally.
+- What happens when two agents modify the same deal simultaneously (e.g., one changes stage, another updates amount)? Last-write-wins — the most recent update replaces without conflict detection or merge. The audit log records both writes with timestamps for traceability.
 
 ## Requirements *(mandatory)*
 
@@ -133,10 +144,10 @@ An admin reviews audit logs, verifies sensitive data encryption is active, and c
 ### Key Entities
 
 - **Contact**: A customer or lead. Key attributes: name, phone (encrypted), email (encrypted), agent assignment, account association. Linked to deals, calls, and tickets.
-- **Deal**: A sales opportunity. Key attributes: title, value, pipeline stage, expected close date, contact association, account association. Linked to contacts and accounts.
+- **Deal**: A sales opportunity. Key attributes: title, value, pipeline stage, expected close date, contact association, account association. Linked to contacts and accounts. Stage transitions: forward-only with skips allowed (e.g., discovery → proposal, qualification → closed_won). Backward movement and reopening from closed_won/closed_lost are prohibited. Ordered stages: discovery → qualification → proposal → negotiation → (closed_won | closed_lost).
 - **Account**: A business/organization. Key attributes: name, health score, industry. Aggregates multiple contacts and deals.
 - **Call**: A voice interaction. Key attributes: transcript (encrypted), duration, participants, sentiment markers, summary. Linked to contacts.
-- **Ticket**: A support request. Key attributes: title, status, priority, contact association. Linked to contacts.
+- **Ticket**: A support request. Key attributes: title, status, priority, contact association. Linked to contacts. Status transitions: forward flow open → in_progress → resolved → closed. Only `closed` can return to `in_progress` (customer reopen). No other backwards movement.
 - **AuditLog**: Immutable record of data access. Key attributes: actor_id, actor_role, action, entity_type, entity_id, timestamp, ip_address. Append-only.
 - **UserSession**: Conversation state for a contact across a channel. Key attributes: user_id (FK → contacts), channel (whatsapp/voice), messages (encrypted JSONB of turn history), context (cached CRM context for subsequent turns). Linked to contacts. Retained 90 days after last activity.
 - **CacheEmbedding**: Semantic cache entry for AI response deduplication. Key attributes: embedding (768-dim vector), prompt_hash (content-addressable dedup key), response (Zod-validated JSONB), model, accessed_at (for LRU eviction). No direct entity relationship — content-addressed by prompt similarity.
@@ -162,12 +173,12 @@ An admin reviews audit logs, verifies sensitive data encryption is active, and c
 
 - Customers primarily interact via WhatsApp; voice is a secondary channel with lower volume
 - Sales agents are the primary internal users; admin functions are infrequent
-- The system operates with 25 contacts, 15 deals, 8 calls, and 5 tickets in seed data (small business scale)
+- The system operates with 25 contacts, 15 deals, 8 calls, and 5 tickets in seed data (small business scale). Scalability target: 10x growth (250 contacts, 150 deals) without architectural changes — pagination on list endpoints and indexing are sufficient.
 - Cloud service free tiers (database 500 MB storage, graph database 200 MB, voice platform 50 GB/month) are sufficient for initial operation
 - WhatsApp message delivery is reliable; the platform may redeliver the same message but won't silently drop messages
 - The encryption key is stored securely in the deployment environment, never in code or version control
 - A local AI model option is available as an optional third-tier fallback but not required for production
-- Privacy regulation compliance (GDPR-style data access and erasure requests) is not required for initial launch but the architecture supports it
+- Privacy regulation compliance (GDPR-style data access and erasure requests) is gated behind the `DSAR_ENABLED` env var, not active for initial launch. The encryption architecture and immutable audit logs support full DSAR without data model retrofitting.
 - The dashboard is read-only; all data mutations happen through the WhatsApp and voice channels
 - Primary AI provider is a cloud-based large language model; a secondary cheaper provider and a local model option form the full fallback chain
 - The knowledge graph is hosted on a managed cloud service with 200 MB storage and 50,000 node limits
