@@ -10,7 +10,7 @@
  * Usage: bun test packages/ai-core/src/core/__tests__/orchestrator.test.ts
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach } from "vitest";
 import { Orchestrator, createOrchestrator, OrchestratorConfig } from "../orchestrator.js";
 import { getCircuitBreaker } from "../circuit-breaker.js";
 import type {

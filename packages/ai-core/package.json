@@ -4,6 +4,10 @@
   "type": "module",
   "packageManager": "pnpm@11.9.0",
   "main": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.48.1",
     "ioredis": "^5.4.1",
@@ -11,6 +15,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0"
+    "@types/node": "^22.10.0",
+    "vitest": "^2.1.8"
   }
 }

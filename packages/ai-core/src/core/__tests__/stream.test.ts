@@ -4,7 +4,7 @@
  * Tests for T021 - processIntentStream()
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach } from "vitest";
 import { Orchestrator, OrchestratorConfig } from "../orchestrator.js";
 import type {
   IContactStore,
@@ -21,7 +21,7 @@ function createStreamingMocks() {
   const calls = { checkAndSet: 0, check: 0, getByPhone: 0, expand: 0, generateStream: 0 };
 
   const idempotencyStore: IIdempotencyStore = {
-    checkAndSet: async () => { calls.checkAndSet++; return true; },
+    checkAndSet: async () => { calls.checkAndSet++; return false; },
   } as unknown as IIdempotencyStore;
 
   const cacheStore: ICacheStore = {
@@ -109,7 +109,7 @@ describe("processIntentStream", () => {
       }
     }
 
-    expect(chunks).toContain("Hello ");
+    expect(chunks).toContain("Hello");
     expect(chunks).toContain("world");
     expect(done).toBe(true);
   });

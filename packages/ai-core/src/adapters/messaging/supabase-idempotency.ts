@@ -30,4 +30,9 @@ export class SupabaseIdempotencyStore implements IIdempotencyStore {
       );
     }
   }
+
+  isDegraded(): boolean {
+    // The Supabase adapter is the *fallback*, not the source of degradation signal.
+    return false;
+  }
 }

@@ -85,16 +85,16 @@
 
 ### Dashboard
 
-- [ ] T023 [US3] Initialize Vite + Vanilla TS dashboard in `apps/web/` (Vite 6, zero framework, Motion One for animations, CSS Grid layout, CSS custom properties theming)
-- [ ] T024 [P] [US3] Build EventTarget-based state store in `apps/web/src/store.ts` (subscribe/publish pattern, state shape: { contacts, deals, calls, health, cache, transcript }, no external deps)
-- [ ] T025 [P] [US3] Build health status cards in `apps/web/src/components/health-cards.ts` (poll /ready every 30s, render per-adapter status: green=healthy, yellow=degraded, dimmed=circuit_open, show latency_ms. No panel blocking)
-- [ ] T026 [P] [US3] Build transcript stream pane in `apps/web/src/components/transcript-pane.ts` (subscribe to Supabase Realtime on calls table, scroll live text with speaker labels customer/agent, sentiment markers color-coded: green/neutral/red)
-- [ ] T027 [P] [US3] Build cache health card in `apps/web/src/components/cache-card.ts` (poll /ready for cache metrics, show hit rate %, last cache store timestamp, model distribution pie)
-- [ ] T028 [US3] Implement all panels with independent data source isolation (each panel handles its own data source failure: show empty/dimmed state, no spinner, no modal, no blocking. All-down → single "Service Unavailable" bar with last-known health time)
+- [x] T023 [US3] Initialize Vite + Vanilla TS dashboard in `apps/web/` (Vite 6, zero framework, Motion One for animations, CSS Grid layout, CSS custom properties theming)
+- [x] T024 [P] [US3] Build EventTarget-based state store in `apps/web/src/store.ts` (subscribe/publish pattern, state shape: { contacts, deals, calls, health, cache, transcript }, no external deps)
+- [x] T025 [P] [US3] Build health status cards in `apps/web/src/components/health-cards.ts` (poll /ready every 30s, render per-adapter status: green=healthy, yellow=degraded, dimmed=circuit_open, show latency_ms. No panel blocking)
+- [x] T026 [P] [US3] Build transcript stream pane in `apps/web/src/components/transcript-pane.ts` (subscribe to Supabase Realtime on calls table, scroll live text with speaker labels customer/agent, sentiment markers color-coded: green/neutral/red)
+- [x] T027 [P] [US3] Build cache health card in `apps/web/src/components/cache-card.ts` (poll /ready for cache metrics, show hit rate %, last cache store timestamp, model distribution pie)
+- [x] T028 [US3] Implement all panels with independent data source isolation (each panel handles its own data source failure: show empty/dimmed state, no spinner, no modal, no blocking. All-down → single "Service Unavailable" bar with last-known health time)
 
 ### Verification (US3)
 
-- [ ] T029 [US3] Run `pnpm dev:web` and verify: all panels render <3s, circuit breaker card updates <30s after failure, transcript pane shows live scrolling text during active call, all-down shows "Service Unavailable" bar
+- [x] T029 [US3] Run `pnpm dev:web` and verify: all panels render <3s, circuit breaker card updates <30s after failure, transcript pane shows live scrolling text during active call, all-down shows "Service Unavailable" bar
 
 ---
 
@@ -108,15 +108,15 @@
 
 ### Degradation Validation
 
-- [ ] T030 [US4] Implement fallback adapter for Neo4j NoOp retriever in `packages/ai-core/src/adapters/neo4j/noop-retriever.ts` (returns minimal CRMGraphContext: contact name only, no deals/accounts/tickets — marked `graphSkipped: true` in degradation metadata)
-- [ ] T031 [P] [US4] Implement CachedEmbeddingProvider in `packages/ai-core/src/adapters/ai/cached-embedding-provider.ts` (returns last-known embeddings from pgvector cache when Gemini is down, max age 1 hour, marks `cacheFallbackUsed: true`)
-- [ ] T032 [US4] Implement idempotency fallback chain in `packages/ai-core/src/adapters/messaging/idempotency.ts` (Redis `SET NX EX 300` → Supabase `idempotency_keys` INSERT ON CONFLICT → at-least-once, mark `idempotencyDegraded: true` on Supabase fallback)
-- [ ] T033 [US4] Wire all degradation metadata into `OrchestratorResponse.metadata` (populate `DegradationDescriptor` fields: primaryModelFailed, graphSkipped, cacheFallbackUsed, idempotencyDegraded, activeCircuitBreakers list)
-- [ ] T033a [P] [US4] Implement DLQ operator lifecycle in `packages/ai-core/src/adapters/messaging/dead-letter-queue.ts` (IDeadLetterQueue contract: `enqueue(msg, error)` → BullMQ, `listDead(limit, offset)` → paginated list, `replay(jobId)` → re-process single job, `purge()` → clear all. Admin endpoint on /ready exposes current DLQ depth)
+- [x] T030 [US4] Implement fallback adapter for Neo4j NoOp retriever in `packages/ai-core/src/adapters/neo4j/noop-retriever.ts` (returns minimal CRMGraphContext: contact name only, no deals/accounts/tickets — marked `graphSkipped: true` in degradation metadata)
+- [x] T031 [P] [US4] Implement CachedEmbeddingProvider in `packages/ai-core/src/adapters/ai/cached-embedding-provider.ts` (returns last-known embeddings from pgvector cache when Gemini is down, max age 1 hour, marks `cacheFallbackUsed: true`)
+- [x] T032 [US4] Implement idempotency fallback chain in `packages/ai-core/src/adapters/messaging/idempotency.ts` (Redis `SET NX EX 300` → Supabase `idempotency_keys` INSERT ON CONFLICT → at-least-once, mark `idempotencyDegraded: true` on Supabase fallback)
+- [x] T033 [US4] Wire all degradation metadata into `OrchestratorResponse.metadata` (populate `DegradationDescriptor` fields: primaryModelFailed, graphSkipped, cacheFallbackUsed, idempotencyDegraded, activeCircuitBreakers list)
+- [x] T033a [P] [US4] Implement DLQ operator lifecycle in `packages/ai-core/src/adapters/messaging/dead-letter-queue.ts` (IDeadLetterQueue contract: `enqueue(msg, error)` → BullMQ, `listDead(limit, offset)` → paginated list, `replay(jobId)` → re-process single job, `purge()` → clear all. Admin endpoint on /ready exposes current DLQ depth)
 
 ### Verification (US4)
 
-- [ ] T034 [US4] Run degradation scenario tests: (a) Neo4j down → graphSkipped=true, contact-only response. (b) Gemini+DeepSeek down → cache hit or polite fallback. (c) Redis down → Supabase idempotency. Verify zero dropped requests, no customer-facing errors
+- [x] T034 [US4] Run degradation scenario tests: (a) Neo4j down → graphSkipped=true, contact-only response. (b) Gemini+DeepSeek down → cache hit or polite fallback. (c) Redis down → Supabase idempotency. Verify zero dropped requests, no customer-facing errors
 
 ---
 

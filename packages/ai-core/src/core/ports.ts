@@ -146,6 +146,8 @@ export interface IGraphRetriever {
 export interface IEmbeddingProvider {
   embed(text: string): Promise<number[]>;
   embedBatch(texts: string[]): Promise<number[][]>;
+  /** True if the most recent embed() returned a cached/fallback value. */
+  lastFallbackUsed(): boolean;
 }
 
 export interface IAgentProvider {
@@ -158,10 +160,36 @@ export interface ICacheStore {
   store(embedding: number[], response: OrchestratorResponse): Promise<void>;
 }
 
+export type DLQErrorMeta = {
+  errorCode: string;
+  errorMessage: string;
+  attemptCount: number;
+  firstAttemptAt: string;
+  lastAttemptAt: string;
+  nextRetryAt?: string;
+};
+
+export type DLQJobEntry = {
+  id: string;
+  queue: string;
+  job: Record<string, unknown>;
+  errorMeta: DLQErrorMeta;
+  enqueuedAt: string;
+};
+
 export interface IIdempotencyStore {
   checkAndSet(key: string, ttl: number): Promise<boolean>;
+  /** True if the last call degraded to a fallback (Redis → Supabase → at-least-once). */
+  isDegraded(): boolean;
 }
 
 export interface IDeadLetterQueue {
   enqueue(queue: string, job: Record<string, unknown>, errorMeta: Record<string, unknown>): Promise<void>;
+  listDead(queue: string, limit?: number, offset?: number): Promise<DLQJobEntry[]>;
+  replay(queue: string, jobId: string): Promise<DLQJobEntry | null>;
+  purge(queue: string): Promise<number>;
+  /** Current number of dead jobs in a queue (used by /ready for SLA gate). */
+  depth(queue: string): Promise<number>;
+  /** Job handler registered via onReplay — invoked when replay() is called. */
+  onReplay(handler: (job: Record<string, unknown>, queue: string) => Promise<void>): void;
 }

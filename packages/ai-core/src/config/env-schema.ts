@@ -35,5 +35,35 @@ export const envSchema = z.object({
   ENCRYPTION_MASTER_KEY: z.string().length(64), // 32-byte hex key
 });
 
-// Parse and validate environment variables on import
-export const env = envSchema.parse(process.env);
+// Lazy env singleton — parse runs on first access, not at import time.
+// This lets tests import modules without setting dummy env vars.
+let _env: z.infer<typeof envSchema> | null = null;
+
+export function getEnv(): z.infer<typeof envSchema> {
+  if (!_env) {
+    _env = envSchema.parse(process.env);
+  }
+  return _env;
+}
+
+// Backward-compatible alias for existing call sites that use `import { env }`.
+// ponytail: lazy singleton via getter; the parse runs on first property access
+// instead of module load, so importing ai-core modules doesn't crash when
+// env vars aren't set (e.g. during unit tests).
+export const env = new Proxy({} as z.infer<typeof envSchema>, {
+  get(_target, prop: string | symbol) {
+    return getEnv()[prop as keyof z.infer<typeof envSchema>];
+  },
+  has(_target, prop: string | symbol) {
+    return prop in getEnv();
+  },
+  ownKeys() {
+    return Reflect.ownKeys(getEnv());
+  },
+  getOwnPropertyDescriptor() {
+    return {
+      enumerable: true,
+      configurable: true,
+    };
+  },
+});

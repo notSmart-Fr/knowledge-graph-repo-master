@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { IntegrationError, DatabaseDomainError, GraphTraversalError, CacheError, CircuitBreakerOpenError } from "../errors.js";
 
 describe("errors.ts", () => {

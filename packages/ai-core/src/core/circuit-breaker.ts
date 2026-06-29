@@ -187,3 +187,5 @@ export function resetAllCircuitBreakers(): void {
   breakers.clear();
   logger.info("Reset all circuit breakers");
 }
+
+export { CircuitBreakerOpenError };

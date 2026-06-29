@@ -10,7 +10,7 @@
  * Usage: bun test scripts/__tests__/voice-agent.test.ts
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach } from "vitest";
 import {
   CallLifecycleManager,
   CartesiaSTTClient,

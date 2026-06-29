@@ -1,5 +1,5 @@
 // This file lives in __chaos__/core/orchestrator to trigger Rule14, Rule16, Rule17
-import type { GraphRetriever } from "../../../core/ports"; // (stub)
+import type { IGraphRetriever } from "../../../core/ports"; // (stub)
 
 // Stubs for chaos tests
 declare class SupabaseContactStore {}
@@ -8,7 +8,7 @@ declare class GeminiEmbeddingProvider {}
 
 class Orchestrator {
   constructor(
-    private graphRetriever: GraphRetriever,
+    private graphRetriever: IGraphRetriever,
   ) {}
 
   // Rule 17: Call graphRetriever.expandFromContact() without circuit breaker (violation!)

@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createLogger } from "../logger.js";
 
 describe("logger.ts", () => {
-  let consoleLogSpy: ReturnType<typeof spyOn>;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleLogSpy = spyOn(console, "log").mockImplementation(() => {});
+    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -25,7 +25,7 @@ describe("logger.ts", () => {
     logger.info("test", { contactNumber: "123-456", contactEmail: "a@b.com", safe: "safe-value" });
 
     expect(consoleLogSpy).toHaveBeenCalled();
-    const logEntry = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    const logEntry = JSON.parse(consoleLogSpy.mock.calls[0]![0] as string);
     // PII stripping uses lowerKey.includes(...) so compound names containing
     // "email" (e.g. contactEmail) ARE stripped; "contactNumber" is not since
     // it doesn't contain the substring "phone".
@@ -39,7 +39,7 @@ describe("logger.ts", () => {
     logger.info("hello", { foo: "bar" });
 
     expect(consoleLogSpy).toHaveBeenCalled();
-    const logEntry = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    const logEntry = JSON.parse(consoleLogSpy.mock.calls[0]![0] as string);
     expect(logEntry.timestamp).toBeDefined();
     expect(logEntry.level).toBe("info");
     expect(logEntry.module).toBe("test-module");

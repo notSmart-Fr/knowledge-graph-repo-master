@@ -62,4 +62,8 @@ export class GeminiEmbeddingProvider implements IEmbeddingProvider {
     const promises = texts.map((text) => this.embed(text));
     return Promise.all(promises);
   }
+
+  lastFallbackUsed(): boolean {
+    return false;
+  }
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { IEmbeddingProvider, IAgentProvider } from "../../../core/ports.js";
 
 describe("AI Provider Contracts", () => {

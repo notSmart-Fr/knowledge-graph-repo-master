@@ -26,4 +26,9 @@ export class RedisIdempotencyStore implements IIdempotencyStore {
   async close(): Promise<void> {
     await this.redis.quit();
   }
+
+  isDegraded(): boolean {
+    // Redis is the primary; this adapter itself never degrades — the composite decides.
+    return false;
+  }
 }

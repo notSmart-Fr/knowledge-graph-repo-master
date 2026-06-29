@@ -51,6 +51,7 @@ export interface DegradationMetadata {
   graphSkipped?: boolean;
   cacheFallbackUsed?: boolean;
   idempotencyDegraded?: boolean;
+  primaryModelFailed?: boolean;
   modelUsed?: string;
   activeCircuitBreakers: string[];
 }
@@ -129,9 +130,13 @@ export class Orchestrator {
     };
 
     try {
-      // Step 1: Check idempotency
+      // Step 1: Check idempotency (fallback chain: Redis → Supabase → at-least-once)
       const idempotencyKey = `${sessionContext.sessionId}-${sessionContext.timestamp}`;
       const isDuplicate = await this.checkIdempotency(idempotencyKey);
+      if (this.isIdempotencyDegraded()) {
+        degradationMetadata.idempotencyDegraded = true;
+        degradationMetadata.degraded = true;
+      }
       if (isDuplicate) {
         logger.info("Duplicate request detected, returning cached response", { traceId });
         return {
@@ -146,8 +151,12 @@ export class Orchestrator {
       // Step 2: Hydrate session context
       const hydratedContext = await this.hydrateSession(sessionContext);
 
-      // Step 3: Check cache
+      // Step 3: Check cache (also detects embedding fallback for cacheFallbackUsed)
       const cachedResponse = await this.checkCache(hydratedContext);
+      if (this.isEmbeddingFallbackActive()) {
+        degradationMetadata.cacheFallbackUsed = true;
+        degradationMetadata.degraded = true;
+      }
       if (cachedResponse) {
         logger.info("Cache hit, returning cached response", { traceId });
         const filteredResponse = validateAndFilterOutput(cachedResponse.text);
@@ -163,7 +172,7 @@ export class Orchestrator {
       // Step 4: Lookup contact
       const contact = await this.lookupContact(hydratedContext);
 
-      // Step 5: Expand graph (with circuit breaker)
+      // Step 5: Expand graph (wrapped in neo4j circuit breaker)
       let graphContext: CRMGraphContext;
       try {
         graphContext = await this.expandGraph(contact);
@@ -178,8 +187,12 @@ export class Orchestrator {
         }
       }
 
-      // Step 6: Call AI agent
-      const agentResponse = await this.callAgent(graphContext, hydratedContext);
+      // Step 6: Call AI agent (with primary-model-failure detection)
+      const { response: agentResponse, primaryFailed } = await this.callAgent(graphContext);
+      if (primaryFailed) {
+        degradationMetadata.primaryModelFailed = true;
+        degradationMetadata.degraded = true;
+      }
 
       // Step 7: Sanitize output
       const sanitizedText = validateAndFilterOutput(agentResponse.text);
@@ -289,7 +302,14 @@ export class Orchestrator {
       };
     }
 
-    return await this.config.graphRetriever.expandFromContact(contact.id);
+    // Wrap graph expansion in the neo4j circuit breaker. After 3 consecutive
+    // failures the breaker opens and subsequent calls short-circuit with
+    // CircuitBreakerOpenError, which the pipeline handles as graphSkipped.
+    const breaker = this.breakers.get("neo4j");
+    if (!breaker) {
+      return this.config.graphRetriever.expandFromContact(contact.id);
+    }
+    return breaker.execute(() => this.config.graphRetriever.expandFromContact(contact.id));
   }
 
   private createFallbackGraphContext(
@@ -307,15 +327,39 @@ export class Orchestrator {
 
   private async callAgent(
     graphContext: CRMGraphContext,
-    sessionContext: SessionContext
-  ): Promise<OrchestratorResponse> {
-    // Build context for the agent
-    const context: CRMGraphContext = {
-      ...graphContext,
-    };
+    _sessionContext?: SessionContext,
+  ): Promise<{ response: OrchestratorResponse; primaryFailed: boolean }> {
+    const context: CRMGraphContext = { ...graphContext };
+    try {
+      const response = await this.config.agentProvider.generate(context);
+      // MastraAgentProvider returns { degraded: true, modelUsed: "deepseek-chat" }
+      // when the primary model fails — treat that as primaryModelFailed.
+      const primaryFailed = response.metadata.degraded === true;
+      return { response, primaryFailed };
+    } catch (error: unknown) {
+      logger.warn("Primary agent call failed, attempting fallback chain", {
+        error: String(error),
+      });
+      // Fallback was already attempted inside MastraAgentProvider; if it
+      // still throws here, surface a polite fallback message.
+      return {
+        response: {
+          text: "I'm sorry, I'm having trouble generating a response right now. Please try again.",
+          metadata: { degraded: true, cacheHit: false, modelUsed: "fallback" },
+        },
+        primaryFailed: true,
+      };
+    }
+  }
 
-    const response = await this.config.agentProvider.generate(context);
-    return response;
+  private isIdempotencyDegraded(): boolean {
+    const store = this.config.idempotencyStore as { isDegraded?: () => boolean };
+    return typeof store.isDegraded === "function" ? store.isDegraded() : false;
+  }
+
+  private isEmbeddingFallbackActive(): boolean {
+    const provider = this.config.embeddingProvider as { lastFallbackUsed?: () => boolean };
+    return typeof provider.lastFallbackUsed === "function" ? provider.lastFallbackUsed() : false;
   }
 
   private async storeCache(

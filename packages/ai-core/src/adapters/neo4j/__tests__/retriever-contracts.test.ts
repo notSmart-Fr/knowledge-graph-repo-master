@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { IGraphRetriever } from "../../../core/ports.js";
 
 describe("Neo4j Retriever Contracts", () => {

@@ -1,6 +1,8 @@
 import { createServer, IncomingMessage, ServerResponse, Server } from "http";
 import { createLogger } from "../core/logger.js";
 import { runHealthChecks, SystemHealth } from "./health-checks.js";
+import { getGlobalDLQ } from "../adapters/messaging/bullmq-dlq.js";
+import { getAllCircuitBreakerMetrics } from "../core/circuit-breaker.js";
 
 const logger = createLogger("health-router");
 
@@ -37,11 +39,28 @@ function transformHealthToReady(health: SystemHealth): {
   status: "healthy" | "degraded";
   failures: string[];
   timestamp: string;
+  dlqDepth: Record<string, number>;
+  dlqTotal: number;
+  circuitBreakers: Record<string, { state: string; failures: number }>;
 } {
+  const dlq = getGlobalDLQ();
+  const dlqSnapshot = dlq.snapshot();
+  let dlqTotal = 0;
+  for (const depth of Object.values(dlqSnapshot)) dlqTotal += depth;
+
+  const breakerMetrics = getAllCircuitBreakerMetrics();
+  const breakers: Record<string, { state: string; failures: number }> = {};
+  for (const [name, metrics] of Object.entries(breakerMetrics)) {
+    breakers[name] = { state: metrics.state, failures: metrics.failures };
+  }
+
   return {
     status: health.overall === "down" ? "degraded" : health.overall,
     failures: health.failures,
     timestamp: health.timestamp,
+    dlqDepth: dlqSnapshot,
+    dlqTotal,
+    circuitBreakers: breakers,
   };
 }
 
