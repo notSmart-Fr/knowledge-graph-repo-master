@@ -10,7 +10,13 @@
 
 ## Clarifications
 
-### Session 2026-06-28
+### Session 2026-06-29
+
+- Q: Which backing data source feeds each dashboard panel? → A: Hybrid — `/ready` endpoint polled every 30s for health cards, cache card, and circuit-breaker states; transcript pane uses Supabase Realtime on the `calls` table for live streaming. No OTel scrape, no all-Realtime.
+- Q: What is the shape of a transcript chunk rendered by the dashboard transcript pane? → A: Per-chunk speaker + per-chunk sentiment. Each chunk has `speaker: 'customer' | 'agent'`, `text: string`, `timestamp_ms: number`, `sentiment: 'positive' | 'neutral' | 'negative'`. This supports barge-in and gives operators granular, timestamped sentiment markers.
+- Q: What does the dashboard show when ALL its data sources (`/ready`, Supabase Realtime) are simultaneously unreachable? → A: Single non-blocking banner at the top reading "Service Unavailable — last healthy at {timestamp}". All panels render their last-known state (dimmed if stale). No spinner, no modal, no white screen, no per-panel error popup.
+- Q: How is "active call" defined for the dashboard active-calls panel? → A: Derived state — a call is "active" when `transcript_json.chunks.length > 0 AND summary IS NULL`. No new schema field. Completed = `summary IS NOT NULL`.
+- Q: How are per-chunk sentiment markers visually encoded in the dashboard transcript pane? → A: Color-only on left-border accent of each chunk — positive=green, neutral=gray, negative=red. Hover tooltip shows full label. `aria-label` provided for screen-reader accessibility.
 
 - Q: What are the valid deal stage transition rules? → A: Forward-only with skips — deals can advance any number of stages forward (e.g., discovery → proposal), but never move backward and never reopen from closed_won or closed_lost.
 - Q: When does GDPR/DSAR compliance activate? → A: Feature-flagged for later — data model and encryption architecture support DSAR from day one, but retrieval/erasure endpoints are gated behind `DSAR_ENABLED=true` env var for future activation.
@@ -68,7 +74,9 @@ An operations team member opens the web dashboard to monitor live system health:
 
 2. **Given** the knowledge graph service is unreachable, **When** the dashboard loads, **Then** the graph status card shows a dimmed "degraded" state. The transcript stream and contact context panels continue working from the primary database alone. No spinner, no modal, no error popup.
 
-3. **Given** an active voice call, **When** the dashboard is open, **Then** the transcript stream pane shows live scrolling text with speaker labels (customer vs. agent) and sentiment markers updating in real-time.
+3. **Given** an active voice call, **When** the dashboard is open, **Then** the transcript stream pane shows live scrolling text with speaker labels (customer vs. agent) and per-chunk sentiment markers encoded as a left-border accent (positive=green, neutral=gray, negative=red), updating in real-time. Hover tooltip shows the full sentiment label; `aria-label` provides screen-reader equivalent.
+
+4. **Given** all dashboard data sources (`/ready` and Supabase Realtime) are simultaneously unreachable, **When** the dashboard is open, **Then** a single non-blocking banner at the top displays "Service Unavailable — last healthy at {timestamp}". All panels render their last-known state (dimmed if stale). No spinner, no modal, no per-panel error popup.
 
 ---
 
@@ -136,7 +144,7 @@ An admin reviews audit logs, verifies sensitive data encryption is active, and c
 - **FR-009**: System MUST log all CRM data access to an immutable audit trail with actor ID, role, action, entity, timestamp, and IP address
 - **FR-010**: System MUST expose health (liveness) and readiness (degradation status) endpoints for traffic routing
 - **FR-011**: System MUST enforce three access roles (admin, agent, viewer) with data-level access policies
-- **FR-012**: System MUST provide a read-only web dashboard showing live transcript stream, service health states, cache effectiveness, and active calls
+- **FR-012**: System MUST provide a read-only web dashboard showing live transcript stream (Supabase Realtime on `calls` table), service health states and cache effectiveness (polled from `/ready` endpoint every 30s), and active calls. All panels MUST render independently without blocking each other when any single data source is unreachable.
 - **FR-013**: System MUST route failed background tasks (message delivery, summarization, data ingestion) to a retry queue with full failure context
 - **FR-014**: System MUST validate all required configuration and external service connectivity at startup before accepting any traffic
 - **FR-015**: System MUST strip from all AI-generated output before user delivery: (a) sensitive personal data matching phone number and email regex patterns, (b) profanity against a configurable blocklist, and (c) prompt injection patterns including "ignore previous instructions", "you are now", "system:", and role-switching directives. Any output where stripping removes more than 50% of the content MUST be discarded and replaced with a generic fallback response.
@@ -162,7 +170,7 @@ An admin reviews audit logs, verifies sensitive data encryption is active, and c
 - **SC-002**: Voice call participants experience less than 1.5 seconds of perceived pause from end-of-speech (STT finalization) to start-of-TTS (first audio byte) for 95% of turns. TTS playback duration is NOT included in the pause measurement.
 - **SC-003**: The system continues processing requests when any single external service is completely unavailable — zero requests dropped
 - **SC-004**: The semantic cache serves at least 30% of AI generation requests from cache (measured over rolling 1-hour windows), avoiding redundant external AI calls
-- **SC-005**: No individual service health check remains in a failed state for more than 60 seconds consecutively in normal operation
+- **SC-005**: No circuit breaker remains open for more than 60 seconds consecutively in normal operation (aligns with constitution SLA gate: circuit breaker self-heals via half-open probe after 30s open → 30s grace window)
 - **SC-006**: The web dashboard loads all panels within 3 seconds and shows accurate service health states within 30 seconds of a failure
 - **SC-007**: AI-generated responses are faithful to the source CRM data with at least 90% accuracy (measured against a golden dataset of 50 CRM conversations)
 - **SC-008**: An admin can retrieve a complete audit trail for any CRM entity (contact, deal, call) covering the last 90 days

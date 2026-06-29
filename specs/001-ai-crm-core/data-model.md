@@ -89,14 +89,16 @@ discovery → qualification → proposal → negotiation → closed_won
 | `contact_id` | UUID | FK → contacts.id | |
 | `agent_id` | UUID | FK → auth.users.id | For RLS |
 | `direction` | text | NOT NULL | `inbound` or `outbound` |
-| `transcript_json` | jsonb | encrypted | AES-256-GCM, full transcript blob |
+| `transcript_json` | jsonb | encrypted | AES-256-GCM. Shape: `{ chunks: TranscriptChunk[] }` where each chunk is `{ speaker: 'customer' \| 'agent', text: string, timestamp_ms: number, sentiment: 'positive' \| 'neutral' \| 'negative' }`. Supports barge-in and per-turn sentiment markers. |
 | `summary` | text | | Post-call AI summary |
-| `sentiment` | text | | `positive`, `neutral`, `negative` |
+| `sentiment` | text | | Call-level rollup `positive`, `neutral`, `negative` (computed from chunk sentiments; surfaced when chunks unavailable) |
 | `action_items` | jsonb | | `[{ text, assignee, due }]` |
 | `duration_sec` | int | | |
 | `created_at` | timestamptz | DEFAULT now() | |
 
 **Retention**: 90 days. Soft-delete after.
+
+**Active state (derived, no schema field)**: A call is considered `active` when `transcript_json.chunks.length > 0 AND summary IS NULL`. Completed = `summary IS NOT NULL`. Dashboard uses this derived state to populate the active-calls panel.
 
 **RLS**: `agent_id = auth.uid()` for SELECT/INSERT/UPDATE.
 

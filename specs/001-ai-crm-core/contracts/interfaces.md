@@ -29,6 +29,13 @@ interface IDealStore {
 ### ICallStore
 
 ```typescript
+type TranscriptChunk = {
+  speaker: "customer" | "agent";
+  text: string;
+  timestamp_ms: number;
+  sentiment: "positive" | "neutral" | "negative";
+};
+
 interface ICallStore {
   create(call: Omit<Call, "id" | "created_at">): Promise<Call>;
   appendTranscript(callId: string, chunk: TranscriptChunk): Promise<void>;

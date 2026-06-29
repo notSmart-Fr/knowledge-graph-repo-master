@@ -1,0 +1,160 @@
+/* AI CRM Operator Dashboard — base styles.
+   Pure #000 background, CSS Grid 65/35 asymmetric layout, no frameworks. */
+
+:root {
+  --color-bg: #000;
+  --color-surface: #0a0a0a;
+  --color-border: #1a1a1a;
+  --color-border-active: #2a2a2a;
+  --color-text: #e5e5e5;
+  --color-text-dim: #737373;
+  --color-text-faint: #404040;
+
+  /* Sentiment accents (clarified 2026-06-29 — color-only encoding) */
+  --color-sentiment-positive: #22c55e;
+  --color-sentiment-neutral: #737373;
+  --color-sentiment-negative: #ef4444;
+
+  /* Service status accents */
+  --color-status-healthy: #22c55e;
+  --color-status-degraded: #eab308;
+  --color-status-down: #ef4444;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+
+  --radius-card: 8px;
+  --transition-fast: 0.15s ease-out;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+#app {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 65% 35%;
+  grid-template-rows: 1fr 80px;
+  grid-template-areas:
+    "transcript sidebar"
+    "contact contact";
+  gap: 1px;
+  background: var(--color-border);
+}
+
+/* Banner for the all-down state (clarified 2026-06-29 — single non-blocking banner) */
+.banner-unavailable {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 8px 16px;
+  background: rgba(239, 68, 68, 0.15);
+  border-bottom: 1px solid var(--color-status-down);
+  color: var(--color-text);
+  font-size: 13px;
+  text-align: center;
+  z-index: 100;
+}
+
+.area-transcript {
+  grid-area: transcript;
+  background: var(--color-bg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.area-sidebar {
+  grid-area: sidebar;
+  background: var(--color-bg);
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 12px;
+}
+
+.area-contact {
+  grid-area: contact;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Card primitive — used by all sidebar cards */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: 16px;
+  overflow: hidden;
+  position: relative;
+  transition: border-color var(--transition-fast);
+}
+
+.card[data-stale="true"] {
+  opacity: 0.5;
+}
+
+.card h3 {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.card .value {
+  font-size: 24px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.card .meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-text-faint);
+}
+
+/* Status indicator dot */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.dot[data-status="healthy"] {
+  background: var(--color-status-healthy);
+}
+.dot[data-status="degraded"] {
+  background: var(--color-status-degraded);
+}
+.dot[data-status="down"] {
+  background: var(--color-status-down);
+  box-shadow: 0 0 6px var(--color-status-down);
+}
+.dot[data-status="circuit_open"] {
+  background: transparent;
+  border: 1px solid var(--color-status-degraded);
+}

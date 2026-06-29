@@ -10,6 +10,7 @@
 
 **Phase 1 (complete)**: T001-T015 — Orchestrator pipeline, WhatsApp transport, observability, seed data.
 **Phase 2 (complete)**: T016-T022 — Voice agent with Cartesia Sonic (STT+TTS), call summarizer, live-assist, streaming orchestrator.
+**Phase 3 (complete)**: T023-T029 — Vite + Vanilla TS dashboard, EventTarget store, health/transcript/cache/active-calls panels, all-down banner.
 
 ---
 
@@ -140,11 +141,12 @@
 ### DSAR Architecture
 
 - [ ] T039 [P] [US5] Gate DSAR endpoints behind `DSAR_ENABLED` env var in `packages/ai-core/src/config/env-schema.ts` (add `DSAR_ENABLED` as optional boolean to Zod env schema, default false)
-- [ ] T040 [US5] Stub DSAR export endpoint in `packages/ai-core/src/features/contacts/dsar.ts` (return empty 501 when `DSAR_ENABLED=false`, architecture ready: can join contacts↔calls↔tickets↔audit_logs by contact_id)
+- [ ] T040 [US5] Implement DSAR export endpoint in `packages/ai-core/src/features/contacts/dsar.ts` (when `DSAR_ENABLED=true`: join contacts↔calls↔tickets↔audit_logs by contact_id, return complete dataset as JSON. When `DSAR_ENABLED=false`: return 501)
+- [ ] T040a [P] [US5] Implement `deleteByOwner(ownerId)` in every Supabase adapter (contacts, deals, calls, tickets, user_sessions, audit_logs — hard-deletes all records owned by a given contact, including encrypted fields, session history, transcripts. Called by DSAR endpoint when DSAR_ENABLED=true)
 
 ### Verification (US5)
 
-- [ ] T041 [US5] Run `pnpm exec vitest run` for encryption: encrypt→decrypt roundtrip, verify PII fields are ciphertext in DB, verify key rotation re-encrypts on read. Run audit log test: verify INSERT succeeds with actor fields, verify UPDATE/DELETE blocked by RLS
+- [ ] T041 [US5] Run `pnpm exec vitest run` for encryption: encrypt→decrypt roundtrip, verify PII fields are ciphertext in DB, verify key rotation re-encrypts on read. Run audit log test: verify INSERT succeeds with actor fields, verify UPDATE/DELETE blocked by RLS. Verify audit_logs table has 90-day retention policy and no UPDATE/DELETE grants. Verify `GET /audit?entity=contact&id=X&from=90d` returns complete trail (SC-008)
 
 ---
 

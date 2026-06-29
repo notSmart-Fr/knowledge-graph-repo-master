@@ -13,8 +13,9 @@
     "test:watch": "pnpm --filter @dtc/ai-core exec vitest",
     "clean": "node -e \"['packages/ai-core/dist', 'tsconfig.tsbuildinfo', 'packages/ai-core/tsconfig.tsbuildinfo'].forEach(p => { try { require('fs').rmSync(p, { recursive: true, force: true }) } catch {} })\"",
     "validate": "echo 'Validate pipeline — run after implementation is complete.'",
-    "dev:web": "echo 'UI dashboard — run after Task 12 is complete.'",
-    "build:web": "echo 'UI dashboard build — run after Task 12 is complete.'"
+    "dev:web": "pnpm --filter @dtc/web dev",
+    "build:web": "pnpm --filter @dtc/web build",
+    "preview:web": "pnpm --filter @dtc/web preview"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
