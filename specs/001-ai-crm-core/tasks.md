@@ -14,11 +14,11 @@
 
 ### Orchestrator Pipeline
 
-- [ ] T001 Build circuit breaker wrapper in `packages/ai-core/src/core/circuit-breaker.ts` (3 consecutive failures → open 30s → half-open probe, ephemeral per-process state, concurrent probe guard: first wins, others wait 5s)
-- [ ] T002 [P] Implement startup validator in `packages/ai-core/src/config/startup-validator.ts` (check all 6: SUPABASE_URL, NEO4J_URI, REDIS_URL, GEMINI_API_KEY, ENCRYPTION_MASTER_KEY, BULLMQ config — crash on missing)
-- [ ] T003 [P] Implement health router in `packages/ai-core/src/health/health-router.ts` (GET /health returns `{"status":"ok"}`, GET /ready returns `{"status":"healthy|degraded","failures":[...],"timestamp":"..."}` on port 8280)
-- [ ] T004 [P] Implement per-adapter health checks in `packages/ai-core/src/health/health-checks.ts` (ping Supabase, Neo4j, Redis — each returns latency_ms and healthy/degraded/down, consumed by /ready)
-- [ ] T005 Build orchestrator pipeline in `packages/ai-core/src/core/orchestrator.ts` (8-step: hydrate session → check cache → lookup contact → expand graph → call agent → sanitize output → store cache → append session. Each step wrapped in OTel span, max 8 spans/request)
+- [x] T001 Build circuit breaker wrapper in `packages/ai-core/src/core/circuit-breaker.ts` (3 consecutive failures → open 30s → half-open probe, ephemeral per-process state, concurrent probe guard: first wins, others wait 5s)
+- [x] T002 [P] Implement startup validator in `packages/ai-core/src/config/startup-validator.ts` (check all 6: SUPABASE_URL, NEO4J_URI, REDIS_URL, GEMINI_API_KEY, ENCRYPTION_MASTER_KEY, BULLMQ config — crash on missing)
+- [x] T003 [P] Implement health router in `packages/ai-core/src/health/health-router.ts` (GET /health returns `{"status":"ok"}`, GET /ready returns `{"status":"healthy|degraded","failures":[...],"timestamp":"..."}` on port 8280)
+- [x] T004 [P] Implement per-adapter health checks in `packages/ai-core/src/health/health-checks.ts` (ping Supabase, Neo4j, Redis — each returns latency_ms and healthy/degraded/down, consumed by /ready)
+- [x] T005 Build orchestrator pipeline in `packages/ai-core/src/core/orchestrator.ts` (8-step: hydrate session → check cache → lookup contact → expand graph → call agent → sanitize output → store cache → append session. Each step wrapped in OTel span, max 8 spans/request)
 - [ ] T006 [P] Implement idempotency guard in orchestrator pipeline `packages/ai-core/src/core/orchestrator.ts` (call `IIdempotencyStore.checkAndSet()` before processing, fallback: Redis → Supabase → at-least-once)
 - [ ] T007 [P] Implement degradation paths in orchestrator (on circuit open: skip graph → Supabase-only context + cache lookup. On all AI down + cache miss → polite fallback message. On idempotency both down → process anyway)
 - [ ] T008 Implement CRM agent in `packages/ai-core/src/agents/crm-agent.ts` (Mastra agent with Zod-validated output schema, tool contracts: get_contact, get_deals, get_account_health, get_recent_tickets — uses context fields per FR-004)

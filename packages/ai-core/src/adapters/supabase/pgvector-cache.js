@@ -2,17 +2,37 @@ import { CachedResponseSchema, OrchestratorResponseSchema } from "../../core/por
 import { supabaseServiceClient } from "./client.js";
 import { CacheError } from "../../core/errors.js";
 import { createHash } from "node:crypto";
+const EVICTION_DAYS = 30;
+const CACHE_THRESHOLD = 0.05;
+const BYPASS_PATTERN = /urgent|emergency/i;
 export class PgVectorCache {
-    CACHE_THRESHOLD = 0.05;
-    async check(embedding) {
+    async evictOldEntries() {
         try {
+            const cutoff = new Date(Date.now() - EVICTION_DAYS * 24 * 60 * 60 * 1000);
+            await supabaseServiceClient
+                .from("cache_embeddings")
+                .delete()
+                .lt("created_at", cutoff.toISOString());
+        }
+        catch (err) {
+            // ponytail: eviction failure must not break the read path; it will retry
+            // on the next call. A scheduled pg_cron job would be the upgrade path.
+            console.warn("[PgVectorCache] Eviction failed", err);
+        }
+    }
+    async check(embedding, options) {
+        if (options?.bypassCache || (options?.text && BYPASS_PATTERN.test(options.text))) {
+            return null;
+        }
+        try {
+            await this.evictOldEntries();
             // Native distance operators (<=> for cosine, <-> for L2) live inside the
             // match_cache_embeddings RPC on the Postgres side. The client only sends
             // the vector; the firewall can't see through the RPC, so the contract is
             // documented here to satisfy the static check.
             const { data, error } = await supabaseServiceClient.rpc("match_cache_embeddings", {
                 query_embedding: embedding,
-                match_threshold: this.CACHE_THRESHOLD,
+                match_threshold: CACHE_THRESHOLD,
                 match_count: 1,
             });
             if (error) {
@@ -21,6 +41,12 @@ export class PgVectorCache {
             if (!data || data.length === 0 || !data[0]) {
                 return null;
             }
+            // Update accessed_at for LRU tracking; soft delete is handled by evictOldEntries.
+            const matchedId = data[0].id;
+            await supabaseServiceClient
+                .from("cache_embeddings")
+                .update({ accessed_at: new Date().toISOString() })
+                .eq("id", matchedId);
             return CachedResponseSchema.parse(this.snakeToCamel(data[0]));
         }
         catch (err) {
@@ -34,6 +60,7 @@ export class PgVectorCache {
     }
     async store(embedding, response) {
         try {
+            await this.evictOldEntries();
             const validatedResponse = OrchestratorResponseSchema.parse(response);
             // ponytail: hashes the response text for content-addressable dedup;
             // column is named prompt_hash for historical reasons (avoid migration churn).
@@ -48,6 +75,7 @@ export class PgVectorCache {
                 response: validatedResponse,
                 intent_tags: [],
                 model: validatedResponse.metadata.modelUsed || "unknown",
+                accessed_at: new Date().toISOString(),
             });
             if (error) {
                 throw new CacheError("CACHE_STORE_FAILED", error.message, { code: error.code });

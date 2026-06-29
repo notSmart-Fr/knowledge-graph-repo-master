@@ -51,10 +51,46 @@ scripts/           — worker.ts, voice-agent.ts, seed.ts, ingest.ts, eval-rag.t
 - **Never modify `.vscode/mcp.json`** — user must handle MCP server config changes manually.
 - **Prefer existing patterns.** Check `code-map.md` and `architecture.md` in `.knowledge/` before writing new code.
 
-## Spec Location
-`.trae/specs/production-grade-graphrag-core/spec.md` — Single system architecture spec with `tasks.md` (15 tasks) and `checklist.md` (130+ checkpoints). The spec is organized around 9 quality domains (ISO/IEC 25010 + Google SRE): 3 universal (API & Contract, Data & Storage, Error Handling) and 6 operational (Observability, Security, Deployment, Disaster Recovery, Developer Experience, Legal/Compliance).
+## Spec Environment (Speckit)
 
-**Agent rule:** Before implementing any feature, read `spec.md` to understand the architecture contracts and the quality domain framework. Then read `tasks.md` for the ordered execution plan. Each task maps to specific checklist items for verification.
+Features are organized in numbered directories under `specs/`. Each feature is self-contained with its own spec, plan, and tasks.
+
+### Current Feature
+`specs/001-ai-crm-core/` — AI CRM Core (WhatsApp + Voice + Dashboard + Degradation + Security)
+
+| Artifact | Description |
+|---|---|
+| [spec.md](file:///i:/knowledge-graph-repo-master/specs/001-ai-crm-core/spec.md) | 5 user stories, 15 FRs, 10 SCs, 10 entities, edge cases |
+| [plan.md](file:///i:/knowledge-graph-repo-master/specs/001-ai-crm-core/plan.md) | Architecture decisions, phases, constitution check |
+| [tasks.md](file:///i:/knowledge-graph-repo-master/specs/001-ai-crm-core/tasks.md) | 51 tasks across 6 phases with dependency graph |
+| [data-model.md](file:///i:/knowledge-graph-repo-master/specs/001-ai-crm-core/data-model.md) | 10 entities, constraints, RLS, state transitions |
+| [research.md](file:///i:/knowledge-graph-repo-master/specs/001-ai-crm-core/research.md) | 11 architectural decisions documented |
+| [contracts/interfaces.md](file:///i:/knowledge-graph-repo-master/specs/001-ai-crm-core/contracts/interfaces.md) | 11 port interfaces, Zod schemas, endpoint contracts |
+| [quickstart.md](file:///i:/knowledge-graph-repo-master/specs/001-ai-crm-core/quickstart.md) | Setup, run, validation guide |
+
+### Speckit Workflow (one feature at a time)
+
+| Step | Command | Produces |
+|---|---|---|
+| 1 | `/speckit-constitution` | Project principles (`.specify/memory/constitution.md`) |
+| 2 | `/speckit-specify` | `specs/NNN-name/spec.md` with FRs, SCs, entities |
+| 3 | `/speckit-plan` | Architecture decisions, phases, trade-offs |
+| 4 | `/speckit-checklist` | Requirements quality checklists |
+| 5 | `/speckit-clarify` | Resolves ambiguities in spec |
+| 6 | `/speckit-tasks` | Task list with dependency graph |
+| 7 | `/speckit-analyze` | Cross-artifact consistency check |
+| 8 | `/speckit-implement` | Executes the tasks |
+
+### Constitution
+`.specify/memory/constitution.md` — 5 core principles (Port-Adapter, Graceful Degradation, PII Security, AST Firewall, Observability), SLA gates, free tier budget ceilings, test discipline, governance. This is **non-negotiable** — all features must align.
+
+### Adding New Features
+- New capability = new directory (`specs/002-name/`)
+- Run `/speckit-specify` to generate the spec
+- Existing feature artifacts stay untouched
+- Cross-cutting concerns go in the constitution, not a feature spec
+
+**Agent rule:** Before implementing any feature, read the constitution first, then the feature's `spec.md` for contracts and `tasks.md` for the ordered execution plan.
 
 ## Key Facts
 - **11 port interfaces** in `core/ports.ts` — orchestrator never imports concrete adapters
