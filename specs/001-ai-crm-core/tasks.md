@@ -19,25 +19,25 @@
 - [x] T003 [P] Implement health router in `packages/ai-core/src/health/health-router.ts` (GET /health returns `{"status":"ok"}`, GET /ready returns `{"status":"healthy|degraded","failures":[...],"timestamp":"..."}` on port 8280)
 - [x] T004 [P] Implement per-adapter health checks in `packages/ai-core/src/health/health-checks.ts` (ping Supabase, Neo4j, Redis — each returns latency_ms and healthy/degraded/down, consumed by /ready)
 - [x] T005 Build orchestrator pipeline in `packages/ai-core/src/core/orchestrator.ts` (8-step: hydrate session → check cache → lookup contact → expand graph → call agent → sanitize output → store cache → append session. Each step wrapped in OTel span, max 8 spans/request)
-- [ ] T006 [P] Implement idempotency guard in orchestrator pipeline `packages/ai-core/src/core/orchestrator.ts` (call `IIdempotencyStore.checkAndSet()` before processing, fallback: Redis → Supabase → at-least-once)
-- [ ] T007 [P] Implement degradation paths in orchestrator (on circuit open: skip graph → Supabase-only context + cache lookup. On all AI down + cache miss → polite fallback message. On idempotency both down → process anyway)
-- [ ] T008 Implement CRM agent in `packages/ai-core/src/agents/crm-agent.ts` (Mastra agent with Zod-validated output schema, tool contracts: get_contact, get_deals, get_account_health, get_recent_tickets — uses context fields per FR-004)
-- [ ] T009 Implement output sanitizer integration in orchestrator `packages/ai-core/src/core/orchestrator.ts` (call `validateAndFilterOutput()` after AI generation, strip PII/profanity/injection patterns per FR-015, discard and replace with generic fallback if >50% stripped)
-- [ ] T010 Implement seed data script in `scripts/seed.ts` (populate Supabase: 25 contacts, 5 accounts, 15 deals across pipeline stages, 8 calls, 5 tickets with correct FKs and encrypted PII fields)
+- [x] T006 [P] Implement idempotency guard in orchestrator pipeline `packages/ai-core/src/core/orchestrator.ts` (call `IIdempotencyStore.checkAndSet()` before processing, fallback: Redis → Supabase → at-least-once)
+- [x] T007 [P] Implement degradation paths in orchestrator (on circuit open: skip graph → Supabase-only context + cache lookup. On all AI down + cache miss → polite fallback message. On idempotency both down → process anyway)
+- [x] T008 Implement CRM agent in `packages/ai-core/src/agents/crm-agent.ts` (Mastra agent with Zod-validated output schema, tool contracts: get_contact, get_deals, get_account_health, get_recent_tickets — uses context fields per FR-004)
+- [x] T009 Implement output sanitizer integration in orchestrator `packages/ai-core/src/core/orchestrator.ts` (call `validateAndFilterOutput()` after AI generation, strip PII/profanity/injection patterns per FR-015, discard and replace with generic fallback if >50% stripped)
+- [x] T010 Implement seed data script in `scripts/seed.ts` (populate Supabase: 25 contacts, 5 accounts, 15 deals across pipeline stages, 8 calls, 5 tickets with correct FKs and encrypted PII fields)
 
 ### WhatsApp Transport & Integration
 
-- [ ] T011 [P] Build WhatsApp webhook handler in `scripts/worker.ts` (validate payload with Zod `WhatsAppWebhookSchema`, extract message ID as idempotency key, phone as contact lookup, route to `processIntent()`, send response via WhatsApp API, enqueue DLQ on send failure with full payload + error metadata for operator replay)
-- [ ] T012 Wire orchestrator into WhatsApp worker `scripts/worker.ts` (pass sessionId/channel/userId/message through `processIntent()`, handle `OrchestratorResponse.metadata.degraded`, log `trace_id`)
+- [x] T011 [P] Build WhatsApp webhook handler in `scripts/worker.ts` (validate payload with Zod `WhatsAppWebhookSchema`, extract message ID as idempotency key, phone as contact lookup, route to `processIntent()`, send response via WhatsApp API, enqueue DLQ on send failure with full payload + error metadata for operator replay)
+- [x] T012 Wire orchestrator into WhatsApp worker `scripts/worker.ts` (pass sessionId/channel/userId/message through `processIntent()`, handle `OrchestratorResponse.metadata.degraded`, log `trace_id`)
 
 ### Observability
 
-- [ ] T013 [P] Bootstrap OTel in `packages/ai-core/src/config/otel-bootstrap.ts` (head-based sampling 10% prod/100% dev, 60s metric export, WARN+ only in prod logs)
-- [ ] T014 [P] Instrument orchestrator pipeline spans in `packages/ai-core/src/core/orchestrator.ts` (8 spans max per request per Firewall Rule 14: hydrate, cache_check, contact_lookup, graph_expand, agent_generate, sanitize, cache_store, session_append). Add OTel metrics: `cache_hit_total`, `cache_miss_total`, `cache_hit_ratio` gauge — needed to validate SC-004 cache >=30% hit rate
+- [x] T013 [P] Bootstrap OTel in `packages/ai-core/src/config/otel-bootstrap.ts` (head-based sampling 10% prod/100% dev, 60s metric export, WARN+ only in prod logs)
+- [x] T014 [P] Instrument orchestrator pipeline spans in `packages/ai-core/src/core/orchestrator.ts` (8 spans max per request per Firewall Rule 14: hydrate, cache_check, contact_lookup, graph_expand, agent_generate, sanitize, cache_store, session_append). Add OTel metrics: `cache_hit_total`, `cache_miss_total`, `cache_hit_ratio` gauge — needed to validate SC-004 cache >=30% hit rate
 
 ### Verification (US1)
 
-- [ ] T015 Run `bun test` for orchestrator — verify all 8 pipeline steps called in order with mocked ports, verify degradation path activates on circuit open, verify unknown contact flow creates contact + returns greeting. Assert P95 E2E latency <2s from webhook receipt to WhatsApp response send (per SC-001)
+- [x] T015 Run `bun test` for orchestrator — verify all 8 pipeline steps called in order with mocked ports, verify degradation path activates on circuit open, verify unknown contact flow creates contact + returns greeting. Assert P95 E2E latency <2s from webhook receipt to WhatsApp response send (per SC-001)
 
 ---
 

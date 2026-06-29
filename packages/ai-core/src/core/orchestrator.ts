@@ -7,6 +7,13 @@ import {
 import {
   validateAndFilterOutput,
 } from "./sanitize.js";
+import {
+  withSpan,
+  recordCacheHit,
+  recordCacheMiss,
+  recordRequest,
+  initializeTelemetry,
+} from "./tracing.js";
 import type {
   CRMGraphContext,
   OrchestratorResponse,
@@ -22,6 +29,9 @@ import type {
 } from "./ports.js";
 
 const logger = createLogger("orchestrator");
+
+// Initialize telemetry on module load
+initializeTelemetry();
 
 export interface OrchestratorConfig {
   contactStore: IContactStore;
@@ -137,14 +147,14 @@ export class Orchestrator {
       const hydratedContext = await this.hydrateSession(sessionContext);
 
       // Step 3: Check cache
-      const cacheResult = await this.checkCache(hydratedContext);
-      if (cacheResult) {
+      const cachedResponse = await this.checkCache(hydratedContext);
+      if (cachedResponse) {
         logger.info("Cache hit, returning cached response", { traceId });
-        const filteredResponse = validateAndFilterOutput(cacheResult.response.text);
+        const filteredResponse = validateAndFilterOutput(cachedResponse.text);
         return {
           response: {
             text: filteredResponse,
-            metadata: { ...cacheResult.response.metadata, cacheHit: true },
+            metadata: { ...cachedResponse.metadata, cacheHit: true },
           },
           metadata: { ...degradationMetadata, cacheHit: true },
         };
@@ -244,12 +254,13 @@ export class Orchestrator {
     return context;
   }
 
-  private async checkCache(context: SessionContext): Promise<{ response: OrchestratorResponse } | null> {
+  private async checkCache(context: SessionContext): Promise<OrchestratorResponse | null> {
     try {
       const embedding = await this.config.embeddingProvider.embed(context.message);
       const cached = await this.config.cacheStore.check(embedding);
       if (cached) {
-        return { response: cached.response as OrchestratorResponse };
+        // Extract OrchestratorResponse from CachedResponse
+        return cached.response as unknown as OrchestratorResponse;
       }
     } catch (error: unknown) {
       logger.warn("Cache check failed", { error: String(error) });
