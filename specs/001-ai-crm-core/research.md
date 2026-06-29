@@ -4,11 +4,11 @@
 
 ## Decisions
 
-### 1. Runtime: Bun 1.3+ over Node.js
+### 1. Runtime: Node.js 22+ with pnpm over Bun
 
-**Decision**: Bun 1.3+
-**Rationale**: Native TypeScript execution without build step, built-in test runner (`bun test`), WebSocket support for LiveKit/Realtime, faster cold starts for serverless (Vercel). The project's `scripts/worker.ts` and `scripts/voice-agent.ts` benefit from zero-config TS.
-**Alternatives considered**: Node.js 22 — usable but requires `tsx` or `ts-node` for script execution, adds dependency. Deno — good but ecosystem for Mastra/OTel immature.
+**Decision**: Node.js 22+ with pnpm 11.x
+**Rationale**: Node.js 22+ provides a stable LTS runtime with native ESM support. pnpm offers strict module isolation in the monorepo workspace, avoiding the hoisting bugs that npm can cause. The `tsx` package runner provides zero-config TypeScript execution equivalent to Bun's native runner. Node.js also avoids the Windows lockfile crash issues encountered with Bun 1.3.14.
+**Alternatives considered**: Bun 1.3+ — faster startup but Windows lockfile crashes broke `bun install` reliability. Deno — good but ecosystem for Mastra/OTel immature.
 
 ### 2. AI Framework: Mastra over LangChain
 

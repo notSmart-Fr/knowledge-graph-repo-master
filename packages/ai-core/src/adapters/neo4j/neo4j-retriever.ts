@@ -5,6 +5,7 @@ import {
   DealSchema,
   TicketSchema,
   CallSchema,
+  AccountSchema,
 } from "../../core/ports.js";
 import { neo4jDriver } from "./client.js";
 import { GraphTraversalError } from "../../core/errors.js";
@@ -141,14 +142,14 @@ export class Neo4jGraphRetriever implements IGraphRetriever {
 
   private nodeToAccount(node: unknown): Account {
     const n = node as { properties: Record<string, unknown> };
-    return {
+    return AccountSchema.parse({
       id: n.properties.id,
       name: n.properties.name,
       industry: n.properties.industry,
       size: n.properties.size,
       healthScore: n.properties.healthScore,
       createdAt: n.properties.createdAt,
-    };
+    });
   }
 
   private nodeToDeal(node: unknown): Deal {

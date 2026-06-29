@@ -4,9 +4,10 @@
 
 ## Prerequisites
 
-- **Bun** >= 1.3.0 — [install](https://bun.sh)
+- **Node.js** >= 22.0 — [install](https://nodejs.org)
+- **pnpm** >= 11.0 — `npm install -g pnpm`
 - **Docker** — for local Supabase (or use Supabase cloud free tier)
-- **Supabase CLI** — `bun add -g supabase`
+- **Supabase CLI** — `pnpm add -g supabase`
 - **Git** — for version control
 
 **External accounts (free tier)**:
@@ -16,8 +17,7 @@
 - Google AI Studio (Gemini API key)
 - DeepSeek API key
 - LiveKit Cloud (free tier)
-- Deepgram API key (STT)
-- Cartesia API key (TTS)
+- Cartesia API key (STT + TTS)
 - Grafana Cloud Free (optional, for telemetry)
 
 ## Setup
@@ -26,7 +26,7 @@
 # 1. Clone and install
 git clone <repo-url>
 cd knowledge-graph-repo-master
-bun install
+pnpm install
 
 # 2. Start local Supabase (or skip if using cloud)
 supabase start
@@ -49,19 +49,19 @@ cp .env.template .env
 supabase db push
 
 # 5. Verify core build
-bun check      # AST firewall — 0 violations required
-bun test       # Unit + contract tests — 0 failures required
+pnpm check      # AST firewall — 0 violations required
+pnpm test       # Unit + contract tests — 0 failures required
 ```
 
 ## Seed Data
 
 ```bash
 # Populate Supabase with sample CRM data
-bun run scripts/seed.ts
+pnpm exec tsx scripts/seed.ts
 # Expected: 20-30 contacts, 5 accounts, 10-15 deals, 5-8 calls, 3-5 tickets
 
 # Build knowledge graph in Neo4j
-bun run scripts/ingest.ts
+pnpm exec tsx scripts/ingest.ts
 # Expected: Nodes and relationships created. Verify with:
 #   MATCH (n) RETURN labels(n), count(*) — expect 6 label types
 ```
@@ -71,7 +71,7 @@ bun run scripts/ingest.ts
 ### WhatsApp Worker
 
 ```bash
-bun run scripts/worker.ts
+pnpm exec tsx scripts/worker.ts
 # Listens for WhatsApp webhooks
 # Test: curl -X POST http://localhost:3000/webhook -H "Content-Type: application/json" \
 #   -d '{"object":"whatsapp_business_account","entry":[{"id":"1","changes":[{"value":...
@@ -80,7 +80,7 @@ bun run scripts/worker.ts
 ### Voice Agent
 
 ```bash
-bun run scripts/voice-agent.ts
+pnpm exec tsx scripts/voice-agent.ts
 # Connects to LiveKit room
 # Test: Join LiveKit room in browser, speak "What are my open deals?"
 # Expected: TTS response referencing deal data
@@ -89,7 +89,7 @@ bun run scripts/voice-agent.ts
 ### Web Dashboard (Dev)
 
 ```bash
-bun dev:web
+pnpm dev:web
 # Opens http://localhost:5173
 # Expected: Dashboard loads with health cards, transcript pane (empty until active call)
 ```
@@ -99,7 +99,7 @@ bun dev:web
 ### Run Full Validation
 
 ```bash
-bun run validate
+pnpm validate
 # Runs: eval-rag → validate-latency → validate-metrics → validate-sla
 # Output: scripts/validate-results.json
 # Exit 1 if any gate fails
@@ -139,11 +139,11 @@ SELECT phone, email FROM contacts LIMIT 1;
 
 | Command | Purpose |
 |---|---|
-| `bun check` | AST firewall (19 rules, 0 violations required) |
-| `bun test` | Unit + contract tests |
-| `bun run validate` | Full pre-commit pipeline (SLA gates + RAG triad) |
-| `bun run scripts/seed.ts` | Populate Supabase with seed CRM data |
-| `bun run scripts/ingest.ts` | Build Neo4j knowledge graph from Supabase |
-| `bun run scripts/worker.ts` | WhatsApp webhook consumer |
-| `bun run scripts/voice-agent.ts` | LiveKit voice agent |
-| `bun dev:web` | Dashboard dev server (localhost:5173) |
+| `pnpm check` | AST firewall (19 rules, 0 violations required) |
+| `pnpm test` | Unit + contract tests (vitest) |
+| `pnpm validate` | Full pre-commit pipeline (SLA gates + RAG triad) |
+| `pnpm exec tsx scripts/seed.ts` | Populate Supabase with seed CRM data |
+| `pnpm exec tsx scripts/ingest.ts` | Build Neo4j knowledge graph from Supabase |
+| `pnpm exec tsx scripts/worker.ts` | WhatsApp webhook consumer |
+| `pnpm exec tsx scripts/voice-agent.ts` | LiveKit voice agent (Cartesia STT+TTS) |
+| `pnpm dev:web` | Dashboard dev server (localhost:5173) |

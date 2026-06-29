@@ -2,9 +2,16 @@
 
 **Feature**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md)
 
+**Runtime**: Node.js 22+ | **Package Manager**: pnpm 11.x | **Testing**: vitest
+
 ## Status Summary
 
 **Pre-existing foundation (complete)**: Core Kernel (ports, errors, logger, sanitize, env), Adapters (Supabase, Neo4j, AI, messaging), Database Schema (migrations, RLS, RBAC), Feature Slices (contacts, deals, accounts, tickets, calls, pipeline).
+
+**Phase 1 (complete)**: T001-T015 — Orchestrator pipeline, WhatsApp transport, observability, seed data.
+**Phase 2 (complete)**: T016-T022 — Voice agent with Cartesia Sonic (STT+TTS), call summarizer, live-assist, streaming orchestrator.
+
+---
 
 ## Phase 1: User Story 1 — WhatsApp AI Response (P1) 🎯 MVP
 
@@ -37,13 +44,13 @@
 
 ### Verification (US1)
 
-- [x] T015 Run `bun test` for orchestrator — verify all 8 pipeline steps called in order with mocked ports, verify degradation path activates on circuit open, verify unknown contact flow creates contact + returns greeting. Assert P95 E2E latency <2s from webhook receipt to WhatsApp response send (per SC-001)
+- [x] T015 Run `pnpm exec vitest run` for orchestrator — verify all 8 pipeline steps called in order with mocked ports, verify degradation path activates on circuit open, verify unknown contact flow creates contact + returns greeting. Assert P95 E2E latency <2s from webhook receipt to WhatsApp response send (per SC-001)
 
 ---
 
 ## Phase 2: User Story 2 — Voice Call (P1)
 
-**Goal**: Customer voice call transcribed in real-time, same orchestrator pipeline, AI response converted to speech within 1.5s end-of-STT to start-of-TTS.
+**Goal**: Customer voice call transcribed in real-time via Cartesia Sonic, same orchestrator pipeline, AI response converted to speech (also Cartesia) within 1.5s end-of-STT to start-of-TTS. Cartesia serves as the single provider for both STT and TTS (per FR-002).
 
 **Independent Test**: Connect a voice call session, speak "What are my open deals?", verify spoken response references correct deal data.
 
@@ -51,19 +58,19 @@
 
 ### Voice Agent
 
-- [ ] T016 [P] [US2] Build CallLifecycle handler in `scripts/voice-agent.ts` (onStart: create Call in Supabase, onTranscript: append chunk to Call, onInterrupt: discard in-progress TTS, restart pipeline with latest session context, onEnd: finalize Call with summary)
-- [ ] T017 [US2] Integrate Deepgram STT in `scripts/voice-agent.ts` (stream audio to Deepgram, receive STTResult with is_final flag, route final transcript text through `processIntentStream()`)
-- [ ] T018 [US2] Integrate Cartesia TTS in `scripts/voice-agent.ts` (receive `OrchestratorChunk` stream, convert text to audio, stream to LiveKit room. Measure pause: STT finalization timestamp → first TTS byte timestamp — must be <1.5s P95)
-- [ ] T019 [P] [US2] Implement call summarizer agent in `packages/ai-core/src/agents/call-summarizer.ts` (Mastra agent: summarize full transcript → structured summary with action_items, sentiment, key topics)
-- [ ] T020 [P] [US2] Implement live-assist agent in `packages/ai-core/src/agents/live-assist.ts` (Mastra agent: real-time prompts — "customer asked about pricing, here's the deal data: ...", not visible to customer, only to agent dashboard)
+- [x] T016 [P] [US2] Build CallLifecycle handler in `scripts/voice-agent.ts` (onStart: create Call in Supabase, onTranscript: append chunk to Call, onInterrupt: discard in-progress TTS, restart pipeline with latest session context, onEnd: finalize Call with summary)
+- [x] T017 [US2] Integrate Cartesia STT in `scripts/voice-agent.ts` (stream audio to Cartesia Sonic, receive `STTResult` with is_final flag, route final transcript text through `processIntentStream()`)
+- [x] T018 [US2] Integrate Cartesia TTS in `scripts/voice-agent.ts` (receive `OrchestratorChunk` stream, convert text to audio via Cartesia Sonic, stream to LiveKit room. Measure pause: STT finalization timestamp → first TTS byte timestamp — must be <1.5s P95)
+- [x] T019 [P] [US2] Implement call summarizer agent in `packages/ai-core/src/agents/call-summarizer.ts` (Mastra agent: summarize full transcript → structured summary with action_items, sentiment, key topics)
+- [x] T020 [P] [US2] Implement live-assist agent in `packages/ai-core/src/agents/live-assist.ts` (Mastra agent: real-time prompts — "customer asked about pricing, here's the deal data: ...", not visible to customer, only to agent dashboard)
 
 ### Orchestrator Extension
 
-- [ ] T021 [US2] Implement `processIntentStream()` in `packages/ai-core/src/core/orchestrator.ts` (same 8-step pipeline but returns `AsyncIterable<OrchestratorChunk>` for voice streaming, identical degradation behavior to `processIntent()`)
+- [x] T021 [US2] Implement `processIntentStream()` in `packages/ai-core/src/core/orchestrator.ts` (same 8-step pipeline but returns `AsyncIterable<OrchestratorChunk>` for voice streaming, identical degradation behavior to `processIntent()`)
 
 ### Verification (US2)
 
-- [ ] T022 [US2] Run `bun test` for voice agent — verify CallLifecycle transitions (start → transcript → interrupt → end), verify STT→TTS pause <1.5s with mocked services, verify degradation fallback works on voice channel
+- [x] T022 [US2] Run `pnpm exec vitest run` for voice agent — verify CallLifecycle transitions (start → transcript → interrupt → end), verify STT→TTS pause <1.5s with mocked services, verify degradation fallback works on voice channel
 
 ---
 
@@ -86,7 +93,7 @@
 
 ### Verification (US3)
 
-- [ ] T029 [US3] Run `bun dev:web` and verify: all panels render <3s, circuit breaker card updates <30s after failure, transcript pane shows live scrolling text during active call, all-down shows "Service Unavailable" bar
+- [ ] T029 [US3] Run `pnpm dev:web` and verify: all panels render <3s, circuit breaker card updates <30s after failure, transcript pane shows live scrolling text during active call, all-down shows "Service Unavailable" bar
 
 ---
 
@@ -137,7 +144,7 @@
 
 ### Verification (US5)
 
-- [ ] T041 [US5] Run `bun test` for encryption: encrypt→decrypt roundtrip, verify PII fields are ciphertext in DB, verify key rotation re-encrypts on read. Run audit log test: verify INSERT succeeds with actor fields, verify UPDATE/DELETE blocked by RLS
+- [ ] T041 [US5] Run `pnpm exec vitest run` for encryption: encrypt→decrypt roundtrip, verify PII fields are ciphertext in DB, verify key rotation re-encrypts on read. Run audit log test: verify INSERT succeeds with actor fields, verify UPDATE/DELETE blocked by RLS
 
 ---
 
@@ -149,7 +156,7 @@
 
 ### Quality Gates
 
-- [ ] T042 Run `bun check` full AST firewall re-sweep across all new files (19 rules, 0 violations required — scan `core/orchestrator.ts`, `agents/`, `config/`, `health/`, `scripts/`, `apps/web/`)
+- [ ] T042 Run `pnpm check` full AST firewall re-sweep across all new files (19 rules, 0 violations required — scan `core/orchestrator.ts`, `agents/`, `config/`, `health/`, `scripts/`, `apps/web/`)
 - [ ] T043 [P] Build SLA gate validation script in `scripts/validate.ts` (checks: cache hit rate >=30%, idempotency hit rate <=5%, no breaker >60s, DLQ depth <50, AI failure rate <5%, health P95 <500ms — all rolling windows)
 - [ ] T043a [P] Instrument free tier budget counters per constitution telemetry budget table: Supabase storage bytes gauge, Neo4j node + relationship count gauge, LiveKit bandwidth bytes counter. Wire into `/ready` and `scripts/validate.ts` to alert at 80% threshold
 - [ ] T044 [P] Build RAG triad evaluation script in `scripts/eval-rag.ts` (DeepEval on 50-example golden dataset: faithfulness >=0.90, answer relevancy >=0.85, context precision >=0.85)
@@ -162,7 +169,7 @@
 
 ### Final Validation
 
-- [ ] T048 Run `bun run validate` full pre-commit pipeline (bun check → bun test → bun run scripts/eval-rag.ts → bun run scripts/validate.ts — all gates must pass, exit 1 on any failure)
+- [ ] T048 Run `pnpm validate` full pre-commit pipeline (pnpm check → pnpm exec vitest run → pnpm exec tsx scripts/eval-rag.ts → pnpm exec tsx scripts/validate.ts — all gates must pass, exit 1 on any failure)
 
 ---
 
@@ -216,19 +223,18 @@ Developer D: T011 (webhook handler) + T012 (wire orchestrator)
 → All merge, then T015 (verify)
 ```
 
-### Phases 2-5 (after Phase 1 complete)
+### Phases 3-5 (after Phase 1+2 complete)
 ```
-Developer A: Phase 2 (Voice) — T016-T022
-Developer B: Phase 3 (Dashboard) — T023-T029
-Developer C: Phase 4 (Degradation) — T030-T034
-Developer D: Phase 5 (Security) — T035-T041
+Developer A: Phase 3 (Dashboard) — T023-T029
+Developer B: Phase 4 (Degradation) — T030-T034
+Developer C: Phase 5 (Security) — T035-T041
 → All independent, no cross-phase blocking
 ```
 
 ## Implementation Strategy
 
 1. **MVP** = Phase 1 only (WhatsApp AI response). Ship when T001-T015 all pass. This is the product core.
-2. **Add Voice** = Phase 2. Reuses 100% of orchestrator pipeline, adds channel.
-3. **Add Dashboard** = Phase 3. Can be built in parallel with Phase 2, blocks on health endpoints only.
-4. **Harden** = Phases 4+5 can run in parallel after Phase 1 stable.
+2. **Add Voice** = Phase 2. Reuses 100% of orchestrator pipeline, adds channel via Cartesia Sonic (STT+TTS).
+3. **Add Dashboard** = Phase 3. Can be built in parallel with Phase 4+5, blocks on health endpoints only.
+4. **Harden** = Phases 4+5 can run in parallel after Phase 1+2 stable.
 5. **Ship** = Phase 6 validates everything, then tag v1.0.0.

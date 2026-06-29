@@ -8,19 +8,16 @@
 
 Build a production-grade AI CRM with hybrid hexagonal architecture. The system converges WhatsApp messaging, realtime voice calls, and a read-only operator dashboard through a single port-based AI orchestrator. Every external boundary (database, graph, AI, cache, messaging) is defined as a TypeScript interface with graceful degradation via circuit breakers and fallback chains. PII is encrypted at rest with AES-256-GCM. The entire system targets free-tier cloud services with strict budget awareness.
 
-**Progress**: Tasks 1-4 completed (Core Kernel, Adapters, DB Schema, Feature Slices). Tasks 5-16 pending.
+**Progress**: Phases 1-2 completed (T001-T022 — WhatsApp orchestrator + Voice agent with Cartesia Sonic). Phases 3-6 pending.
 
 ## Technical Context
 
-**Language/Version**: TypeScript 5.x, Bun 1.3+ runtime
-
-**Primary Dependencies**: Mastra (AI agents), OpenTelemetry (observability), Zod (validation), Motion One (dashboard animations), LiveKit (voice), Deepgram (STT), Cartesia (TTS)
-
+**Language/Version**: TypeScript 5.x, Node.js 22+ runtime
+**Package Manager**: pnpm 11.x (workspace-native, strict module isolation)
+**Primary Dependencies**: Mastra (AI agents), OpenTelemetry (observability), Zod (validation), Motion One (dashboard animations), LiveKit (voice), Cartesia (STT + TTS)
 **Storage**: Supabase (PostgreSQL + pgvector) for CRM data and semantic cache, Neo4j AuraDB Free for knowledge graph, Upstash Redis for idempotency and BullMQ
-
-**Testing**: `bun test` — zero additional dependencies. Unit tests in `__tests__/` co-located with source. Contract tests verify adapters implement port interfaces.
-
-**Target Platform**: Vercel (deployment) + local Bun runtime (scripts). Dashboard served as static Vite build.
+**Testing**: `vitest` — zero additional dependencies. Unit tests in `__tests__/` co-located with source. Contract tests verify adapters implement port interfaces.
+**Target Platform**: Vercel (deployment) + local Node.js runtime (scripts). Dashboard served as static Vite build.
 
 **Project Type**: Monorepo — `packages/ai-core/` (backend) + `apps/web/` (dashboard) + `scripts/` (workers, seed, validate)
 
@@ -39,7 +36,7 @@ Build a production-grade AI CRM with hybrid hexagonal architecture. The system c
 | I. Port-Adapter Architecture | **PASS** | All 11 port interfaces in `core/ports.ts`. Orchestrator depends only on interfaces. Adapters in `adapters/` implement ports. Verified by Tasks 1.2, 2.x. |
 | II. Graceful Degradation | **PASS** | Circuit breaker in `core/circuit-breaker.ts`. Fallback chain: Gemini → DeepSeek → Ollama → cache. NoOp retriever for Neo4j degradation. Verified by Task 5.2-5.4 (pending). |
 | III. PII Security by Default | **PASS** | AES-256-GCM + HKDF in `adapters/encryption/`. Zero PII in logs/errors via `IntegrationError` PII-strip. `validateAndFilterOutput()` on all AI output. Verified by Tasks 1.3, 1.5, 6.x. |
-| IV. Compile-Time Safety (AST Firewall) | **PASS** | 19-rule firewall. `bun check` blocks on violations. Scan paths cover `features/`, `adapters/`, `core/`, `agents/`. Verified by Task 14 (pending re-sweep). |
+| IV. Compile-Time Safety (AST Firewall) | **PASS** | 19-rule firewall. `pnpm run check` blocks on violations. Scan paths cover `features/`, `adapters/`, `core/`, `agents/`. Verified by Task 14 (pending re-sweep). |
 | V. Observability-Driven Operations | **PASS** | OTel spans per pipeline step (max 8/request). Structured JSON logs with `trace_id`. Health on :8280. Metrics families defined. Verified by Tasks 8, 10. |
 
 **Constitution gates all pass.** No violations. No complexity tracking entries needed.

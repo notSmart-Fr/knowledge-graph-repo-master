@@ -2,6 +2,7 @@
   "name": "@dtc/ai-core",
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "pnpm@11.9.0",
   "main": "./src/index.ts",
   "dependencies": {
     "@supabase/supabase-js": "^2.48.1",

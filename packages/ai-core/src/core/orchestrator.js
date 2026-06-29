@@ -231,6 +231,89 @@ export class Orchestrator {
             responseLength: response.length,
         });
     }
+    // T021: Streaming variant for voice channel
+    async *processIntentStream(sessionContext) {
+        const startTime = Date.now();
+        const traceId = `${sessionContext.sessionId}-${Date.now()}`;
+        logger.info("Starting streaming orchestrator pipeline", {
+            traceId,
+            sessionId: sessionContext.sessionId,
+            channel: sessionContext.channel,
+        });
+        try {
+            // Step 1: Idempotency check
+            const idempotencyKey = `${sessionContext.sessionId}-${sessionContext.timestamp}`;
+            const isDuplicate = await this.checkIdempotency(idempotencyKey);
+            if (isDuplicate) {
+                yield { text: "I've already processed this message. How else can I help?", done: true };
+                return;
+            }
+            // Step 2: Hydrate session
+            const hydratedContext = await this.hydrateSession(sessionContext);
+            // Step 3: Cache check
+            const cachedResponse = await this.checkCache(hydratedContext);
+            if (cachedResponse) {
+                logger.info("Stream cache hit", { traceId });
+                const filteredText = validateAndFilterOutput(cachedResponse.text);
+                yield { text: filteredText, done: true, metadata: { cacheHit: true } };
+                return;
+            }
+            // Step 4: Contact lookup
+            const contact = await this.lookupContact(hydratedContext);
+            // Step 5: Graph expand (with circuit breaker protection)
+            let graphContext;
+            try {
+                graphContext = await this.expandGraph(contact);
+            }
+            catch (error) {
+                if (error instanceof CircuitBreakerOpenError) {
+                    logger.warn("Stream graph circuit open, using fallback", { traceId });
+                    graphContext = this.createFallbackGraphContext(contact);
+                }
+                else {
+                    throw error;
+                }
+            }
+            // Step 6: Stream from agent
+            const stream = this.config.agentProvider.generateStream(graphContext);
+            let fullText = "";
+            for await (const chunk of stream) {
+                // Step 7: Sanitize each chunk
+                const sanitizedChunk = validateAndFilterOutput(chunk);
+                fullText += sanitizedChunk;
+                yield { text: sanitizedChunk, done: false };
+            }
+            // Step 8: Cache store and session append
+            yield { text: "", done: true, metadata: { degraded: false, cacheHit: false } };
+            // Async post-processing (don't block stream)
+            this.storeCache(hydratedContext, {
+                text: fullText,
+                metadata: { degraded: false, cacheHit: false },
+            }).catch((error) => {
+                logger.warn("Async cache store failed", { error: String(error) });
+            });
+            this.appendSession(hydratedContext, fullText).catch((error) => {
+                logger.warn("Async session append failed", { error: String(error) });
+            });
+            const totalTime = Date.now() - startTime;
+            logger.info("Streaming pipeline completed", {
+                traceId,
+                totalTimeMs: totalTime,
+                fullTextLength: fullText.length,
+            });
+        }
+        catch (error) {
+            logger.error("Streaming pipeline failed", {
+                traceId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            yield {
+                text: "I'm sorry, I'm having trouble processing your request right now. Please try again in a moment.",
+                done: true,
+                metadata: { degraded: true },
+            };
+        }
+    }
 }
 // Factory function for convenience
 export function createOrchestrator(config) {

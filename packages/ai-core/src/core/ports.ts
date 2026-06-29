@@ -35,7 +35,7 @@ export const CallSchema = z.object({
   contactId: z.string(),
   agentId: z.string().optional(),
   direction: z.enum(["inbound", "outbound"]),
-  transcriptJson: z.record(z.unknown()),
+  transcriptJson: z.record(z.string(), z.unknown()),
   summary: z.string().optional(),
   sentiment: z.enum(["positive", "neutral", "negative"]),
   actionItems: z.array(z.string()),
@@ -89,7 +89,7 @@ export type CRMGraphContext = z.infer<typeof CRMGraphContextSchema>;
 
 export const CachedResponseSchema = z.object({
   id: z.string(),
-  response: z.record(z.unknown()),
+  response: z.record(z.string(), z.unknown()),
   intentTags: z.array(z.string()).default([]),
   model: z.string(),
   createdAt: z.string().datetime(),

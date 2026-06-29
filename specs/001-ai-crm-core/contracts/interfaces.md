@@ -224,17 +224,17 @@ interface WhatsAppOutboundMessage {
 }
 ```
 
-### Voice Call (LiveKit + Deepgram + Cartesia)
+### Voice Call (LiveKit + Cartesia Sonic)
 
 ```typescript
-// STT Input (Deepgram)
+// STT Input (Cartesia Sonic)
 interface STTResult {
   channel: { alternatives: Array<{ transcript: string; confidence: number }> };
   is_final: boolean;
   speech_final: boolean;
 }
 
-// TTS Output (Cartesia)
+// TTS Output (Cartesia Sonic)
 interface TTSRequest {
   transcript: string;
   voice: { mode: "id"; id: string };

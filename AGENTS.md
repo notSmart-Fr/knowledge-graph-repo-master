@@ -1,10 +1,10 @@
 # AI CRM — Architecture Reference
 
 ## Stack
-- **Runtime:** Bun 1.3+
+- **Runtime:** Node.js 22+ (pnpm workspace)
 - **Data:** Supabase (pgvector) + Neo4j AuraDB Free
 - **AI:** Gemini (embedding), Mastra (agents), DeepSeek (fallback)
-- **Voice:** LiveKit + Deepgram STT + Cartesia TTS
+- **Voice:** LiveKit + Cartesia Sonic (STT + TTS)
 - **Messaging:** BullMQ (Redis), WhatsApp API
 - **Telemetry:** OpenTelemetry → Grafana Cloud Free
 - **Security:** AES-256-GCM field encryption, RBAC + RLS
@@ -33,7 +33,7 @@ packages/ai-core/src/
 ├── features/      — CRM vertical slices (contacts, deals, accounts, tickets, calls, pipeline)
 │   └── */         — types.ts + tools.ts per slice
 ├── core/          — ports.ts, orchestrator.ts, circuit-breaker.ts, errors.ts, logger.ts, sanitize.ts
-│   └── __tests__/ — unit tests (bun test, zero deps)
+│   └── __tests__/ — unit tests (vitest, zero deps)
 ├── adapters/      — supabase/, neo4j/, ai/, messaging/, encryption/
 ├── agents/        — crm-agent, call-summarizer, live-assist, pipeline-analyzer
 ├── config/        — startup-validator.ts, env-schema.ts, otel-bootstrap.ts
@@ -96,7 +96,7 @@ Features are organized in numbered directories under `specs/`. Each feature is s
 - **11 port interfaces** in `core/ports.ts` — orchestrator never imports concrete adapters
 - **8-step pipeline** — session hydrate → cache → contact → graph → agent → sanitize → cache store → session append
 - **4-tier fallback** — Gemini → DeepSeek → Ollama (local, conditional) → cached response
-- **19-rule AST firewall** — `bun check` blocks build on violations. 7 domains (Zod, Error, Query, AI, Telemetry, Type, Architecture).
+- **19-rule AST firewall** — `pnpm check` blocks build on violations. 7 domains (Zod, Error, Query, AI, Telemetry, Type, Architecture).
 - **Health on :8280** — `/health` (liveness) + `/ready` (degradation status)
-- **bun test** — unit + contract tests, `__tests__/` next to code, zero dependencies
-- **bun run validate** — pre-commit pipeline (firewall + RAG triad + latency + SLA gates)
+- **vitest** — unit + contract tests, `__tests__/` next to code, zero dependencies
+- **pnpm validate** — pre-commit pipeline (firewall + RAG triad + latency + SLA gates)

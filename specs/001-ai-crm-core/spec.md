@@ -126,7 +126,7 @@ An admin reviews audit logs, verifies sensitive data encryption is active, and c
 ### Functional Requirements
 
 - **FR-001**: System MUST accept incoming WhatsApp messages, validate payload structure, and route through the orchestrator pipeline
-- **FR-002**: System MUST accept voice call audio streams, run speech-to-text, and pass transcribed text through the same orchestrator pipeline
+- **FR-002**: System MUST accept voice call audio streams, run speech-to-text via Cartesia, and pass transcribed text through the same orchestrator pipeline. Cartesia serves as the single provider for both STT and TTS.
 - **FR-003**: System MUST look up contacts by phone number and retrieve associated deals, tickets, and account health from the knowledge graph
 - **FR-004**: System MUST generate AI responses that reference by-name the following CRM context fields when present: contact name, open deal titles with pipeline stages, current account health score, and the 3 most recent ticket subjects. If any field is absent (e.g., contact has no deals), the response MUST omit that field gracefully without hallucinating data.
 - **FR-005**: System MUST prevent duplicate processing of incoming messages using idempotency keys with a 5-minute TTL
