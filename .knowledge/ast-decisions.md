@@ -190,7 +190,9 @@ Every rule in `scripts/ast-firewall.ts` is derived from a specific constitutiona
 | Rule 1 | Data Integrity gates: "All schemas have runtime validation" | `z.string()` without `.max()` — unbounded input | Exported `*Schema` vars: every `z.string()` must have `.max()`; every `z.number()` must have `.min()` + `.max()` |
 | Rule 2 | Data Integrity gates: "Unknown fields rejected" | `z.any().parse()` — "it accepts everything, no more type errors" | Any `.parse()`/`.safeParse()` whose receiver is `z.any()`/`z.unknown()` |
 | Rule 3 | Data Integrity: "All external data validated at boundary" | Skip `.parse()` after `fetch()` — "works in testing" | Every `fetch()` must have `.parse()`/`.safeParse()` as ancestor or sibling statement |
-| Rule 18 | Same as Rule 3, for push/realtime | Skip `.parse()` in `.on()` callback — "payload looks fine" | Every `.on()`/`.subscribe()` callback body must contain `.parse()`/`.safeParse()` |
+| Rule 18 | Same as Rule 3, for push/realtime | `JSON.parse(e.data)` in `.on()` — satisfies old check because `.parse` matched `JSON.parse` | Every `.on()`/`.subscribe()` callback body must contain Zod `.parse()`/`.safeParse()` — **excludes `JSON.parse`** |
+| Rule 26 | Same as Rule 18, native WebSocket API | `ws.onmessage = (e) => { JSON.parse(e.data) }` — PropertyAssignment/BinaryExpression, not `.on()` | `ws.onmessage =` assignment handler body must contain Zod parse |
+| Rule 27 | Same as Rule 3, for `JSON.parse` boundaries | `JSON.parse(ctx.job.metadata)` without schema — not fetch, not WebSocket | `scripts/` + `features/`: `JSON.parse()` must chain to Zod parse (sibling/ancestor/direct arg); literals exempt |
 
 ### Domain B: Error & Resilience — Structural Safety + Leakage Safety
 
@@ -241,6 +243,7 @@ Every rule in `scripts/ast-firewall.ts` is derived from a specific constitutiona
 |---|---|---|---|
 | Rule 16 | I. Port-Adapter: "Orchestrator depends only on ports" | `new SupabaseStore()` in orchestrator — faster than DI wiring | Any `NewExpression` in `core/` matching adapter patterns (`*Store`, `*Provider`, Supabase/Neo4j/Gemini prefixed) |
 | Rule 25 | Development Standards: "The core orchestrator SHALL NOT import from feature directories directly" | `import {} from "../../features/contacts/tools"` — faster than going through the port | Every import declaration in `core/` must not resolve to a `features/` path |
+| Rule 28 | Port-Adapter + 002-chat-widget plan: browser SDK boundary | `import { Room } from 'livekit-client'` in `scripts/` — copied from widget code | `livekit-client` import/dynamic import allowed only under `apps/widget/` |
 | Rule 24 | Naming Conventions: "Adapter files: *.adapter.ts in adapters/<domain>/" | File named without `.adapter.ts` suffix — "the folder is already named adapters" | Files in `adapters/` must end in `.adapter.ts` (⚠️ warn-only for existing files during migration) |
 
 ---
@@ -305,11 +308,12 @@ this.client.post(url, data)                              // custom client, can't
 | 1.0.0 | 2026-06-30 | Initial: derivation methodology, principle→rule mapping |
 | 1.1.0 | 2026-06-30 | Added four safety domains; replaced I/O-only framing with full Code Surface Catalog; added lazy-agent question methodology; added worked idempotency example |
 | 1.3.0 | 2026-06-30 | Implemented Rules 20-25: FetchTimeout, EnvVarFallback, NoHardcodedConfig, StructuredLogs, AdapterNaming (warnings), NoFeatureImports. Completed gap analysis from 7-mechanism constitution extraction. |
+| 1.4.0 | 2026-06-30 | 002-chat-widget surface gaps: Rule 18 fix (JSON.parse false-negative), Rules 26-28 (WsOnmessageZod, JsonParseWithoutZod, LiveKitClientBoundary). Extended script scan paths for widget-server/audio-utils. |
 
 ---
 
 ## References
 
 - [Constitution](file:///i:/knowledge-graph-repo-master/.specify/memory/constitution.md) — source of all AST-enforceable clauses
-- [AST Firewall Source](file:///i:/knowledge-graph-repo-master/scripts/ast-firewall.ts) — implementation (25 rules, 7 domains)
+- [AST Firewall Source](file:///i:/knowledge-graph-repo-master/scripts/ast-firewall.ts) — implementation (28 rules, 7 domains)
 - [AST Firewall Coverage](file:///i:/knowledge-graph-repo-master/.knowledge/ast-firewall-coverage.md) — spec→rule coverage (complementary: maps to spec requirements)

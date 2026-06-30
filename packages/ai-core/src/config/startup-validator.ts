@@ -1,4 +1,5 @@
 import { createLogger } from "../core/logger.js";
+import { execSync } from "node:child_process";
 
 const logger = createLogger("startup-validator");
 
@@ -183,4 +184,37 @@ export function addStartupCheck(check: StartupCheck): void {
 
 export function getStartupChecks(): readonly StartupCheck[] {
   return [...startupChecks];
+}
+
+/** Register widget-server optional checks (LiveKit reachability, ffmpeg). */
+export function registerWidgetStartupChecks(options?: {
+  liveKitHealthCheck?: () => Promise<boolean>;
+}): void {
+  if (options?.liveKitHealthCheck) {
+    addStartupCheck({
+      name: "LIVEKIT_HEALTH",
+      check: async () => {
+        try {
+          return await options.liveKitHealthCheck!();
+        } catch {
+          return false;
+        }
+      },
+      required: false,
+    });
+  }
+
+  addStartupCheck({
+    name: "FFMPEG_AVAILABLE",
+    check: () => {
+      try {
+        execSync("ffmpeg -version", { stdio: "ignore" });
+        return true;
+      } catch {
+        logger.warn("ffmpeg not found — voice clip and WhatsApp audio paths degraded");
+        return false;
+      }
+    },
+    required: false,
+  });
 }

@@ -3,14 +3,15 @@
  *
  * Real-time voice AI for LiveKit rooms:
  * - T016: CallLifecycle handler (onStart, onTranscript, onInterrupt, onEnd)
- * - T017: Deepgram STT integration
- * - T018: Cartesia TTS integration
+ * - T017: Cartesia Sonic STT (streaming WebSocket)
+ * - T018: Cartesia Sonic TTS (streaming WebSocket)
  *
  * Usage: bun run scripts/voice-agent.ts
  */
 
 import { createLogger } from "../packages/ai-core/src/core/logger.js";
 import { CallSummarizerAgent, TranscriptSegment } from "../packages/ai-core/src/agents/call-summarizer.js";
+import { z } from "zod";
 
 const logger = createLogger("voice-agent");
 
@@ -109,7 +110,7 @@ export class CallLifecycleManager {
 
     this.data.transcript.push(segment);
 
-    logger.debug("Transcript segment received", {
+    logger.debug("STT segment received", {
       callId: this.data.callId,
       speaker: segment.speaker,
       length: segment.text.length,
@@ -224,10 +225,24 @@ export interface STTConfig {
   language: string;
 }
 
+const CartesiaInk2EventSchema = z.object({
+  type: z.enum(["turn.start", "turn.update", "turn.end"]),
+  transcript: z.string().optional(),
+  turn_id: z.string().optional(),
+});
+
+const CartesiaLegacySTTSchema = z.object({
+  transcript: z.string().optional(),
+  is_final: z.boolean().optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  channel: z.number().optional(),
+});
+
 export class CartesiaSTTClient {
   private config: STTConfig;
   private ws?: WebSocket;
   private transcriptHandlers: Array<(result: STTResult) => void> = [];
+  private partialTranscript = "";
 
   constructor(config: Partial<STTConfig> = {}) {
     this.config = {
@@ -246,25 +261,39 @@ export class CartesiaSTTClient {
       return;
     }
 
-    // Cartesia Sonic STT WebSocket connection
-    const url = `wss://api.cartesia.ai/tts/websocket?api_key=${this.config.apiKey}&cartesia_version=2024-06-10&language=${this.config.language}`;
+    const params = new URLSearchParams({
+      model: "ink-2",
+      encoding: "pcm_s16le",
+      sample_rate: "16000",
+      cartesia_version: "2026-03-01",
+      access_token: this.config.apiKey,
+    });
+    const url = `wss://api.cartesia.ai/stt/turns/websocket?${params.toString()}`;
 
     this.ws = new WebSocket(url);
 
     this.ws.onmessage = (msg) => {
       try {
-        const data = JSON.parse(msg.data.toString());
-        if (data.transcript) {
-          const result: STTResult = {
-            text: data.transcript,
-            isFinal: data.is_final || false,
-            confidence: data.confidence || 0,
-            speaker: data.channel === 0 ? "agent" : "customer",
-          };
-
-          for (const handler of this.transcriptHandlers) {
-            handler(result);
+        const raw = JSON.parse(msg.data.toString());
+        const ink2 = CartesiaInk2EventSchema.safeParse(raw);
+        if (ink2.success) {
+          const data = ink2.data;
+          if (data.type === "turn.update" && data.transcript) {
+            this.partialTranscript = data.transcript;
+            this.emitTranscript(data.transcript, false);
+          } else if (data.type === "turn.end") {
+            const finalText = data.transcript ?? this.partialTranscript;
+            if (finalText) {
+              this.emitTranscript(finalText, true);
+            }
+            this.partialTranscript = "";
           }
+          return;
+        }
+
+        const legacy = CartesiaLegacySTTSchema.parse(raw);
+        if (legacy.transcript) {
+          this.emitTranscript(legacy.transcript, legacy.is_final ?? false);
         }
       } catch (error: unknown) {
         logger.error("STT message parse error", { error: String(error) });
@@ -272,6 +301,18 @@ export class CartesiaSTTClient {
     };
 
     logger.info("Cartesia STT connected");
+  }
+
+  private emitTranscript(text: string, isFinal: boolean): void {
+    const result: STTResult = {
+      text,
+      isFinal,
+      confidence: 1,
+      speaker: "customer",
+    };
+    for (const handler of this.transcriptHandlers) {
+      handler(result);
+    }
   }
 
   sendAudio(audioData: ArrayBuffer | Int16Array): void {
@@ -317,7 +358,7 @@ export class CartesiaTTSClient {
     this.ws = new WebSocket(url);
 
     this.ws.onmessage = (_msg) => {
-      // Audio data received
+      // Audio frames received
     };
 
     logger.info("Cartesia TTS connected", {

@@ -1,21 +1,25 @@
+/**
+ * Cartesia Sonic STT contract for voice channels (LiveKit WebRTC, async audio uploads).
+ * Reference implementation: CartesiaSTTClient in scripts/voice-agent.ts.
+ */
 
-// ponytail: Placeholder for Deepgram STT adapter.
-// Implementation will use Deepgram SDK for streaming transcription.
-
-export interface TranscriberConfig {
+export interface CartesiaTranscriberConfig {
   apiKey: string;
+  language?: string;
 }
 
-export function createTranscriber(config: TranscriberConfig) {
-  return {
-    start: async (audioStream: AsyncIterable<Uint8Array>) => {
-      // TODO: Implement Deepgram streaming transcription
-      for await (const chunk of audioStream) {
-        // Process audio chunk
-      }
-    },
-    stop: async () => {
-      // TODO: Stop transcription
-    },
-  };
+/** Partial/final chunk from Cartesia streaming STT. */
+export interface CartesiaTranscriptResult {
+  text: string;
+  isFinal: boolean;
+  confidence: number;
+  speaker?: "customer" | "agent";
+}
+
+/** Streaming STT over Cartesia Sonic WebSocket. */
+export interface ICartesiaTranscriber {
+  connect(): Promise<void>;
+  sendAudio(audioData: ArrayBuffer | Int16Array): void;
+  onTranscript(handler: (result: CartesiaTranscriptResult) => void): void;
+  close(): void;
 }

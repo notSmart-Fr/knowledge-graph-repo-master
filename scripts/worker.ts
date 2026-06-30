@@ -105,6 +105,11 @@ export const WhatsAppWebhookSchema = z.object({
 
 export type WhatsAppWebhookPayload = z.infer<typeof WhatsAppWebhookSchema>;
 
+const WhatsAppSendResponseSchema = z.object({
+  messaging_product: z.string(),
+  messages: z.array(z.object({ id: z.string().max(256) })).optional(),
+});
+
 // Webhook verification (GET)
 function verifyWebhook(query: URLSearchParams): boolean {
   const mode = query.get("hub.mode");
@@ -116,7 +121,7 @@ function verifyWebhook(query: URLSearchParams): boolean {
     return true;
   }
 
-  logger.warn("Webhook verification failed", { mode, token });
+  logger.warn("Webhook verification failed", { mode });
   return false;
 }
 
@@ -137,6 +142,7 @@ async function sendWhatsAppMessage(to: string, text: string): Promise<void> {
       type: "text",
       text: { body: text },
     }),
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!response.ok) {
@@ -144,7 +150,12 @@ async function sendWhatsAppMessage(to: string, text: string): Promise<void> {
     throw new Error(`Failed to send WhatsApp message: ${response.status} ${error}`);
   }
 
-  logger.info("WhatsApp message sent", { to, textLength: text.length });
+  const data = WhatsAppSendResponseSchema.parse(await response.json());
+  logger.info("WhatsApp message sent", {
+    to,
+    textLength: text.length,
+    messageId: data.messages?.[0]?.id,
+  });
 }
 
 // Process incoming message
@@ -212,9 +223,7 @@ async function processIntent(
 }
 
 // Handle webhook POST
-async function handleWebhook(body: unknown): Promise<void> {
-  const payload = WhatsAppWebhookSchema.parse(body);
-
+async function handleWebhook(payload: WhatsAppWebhookPayload): Promise<void> {
   logger.info("Received WhatsApp webhook", { object: payload.object, entryCount: payload.entry.length });
 
   for (const entry of payload.entry) {
@@ -326,7 +335,8 @@ function createWorkerServer(): { server: ReturnType<typeof createServer>; start:
         for await (const chunk of req) {
           chunks.push(Buffer.from(chunk));
         }
-        const body = JSON.parse(Buffer.concat(chunks).toString());
+        const raw = JSON.parse(Buffer.concat(chunks).toString());
+        const body = WhatsAppWebhookSchema.parse(raw);
         await handleWebhook(body);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "processed" }));

@@ -148,3 +148,21 @@ export function createHealthCheckAdapter<T>(
     required
   );
 }
+
+/** Register LiveKit adapter health for /ready (non-required — degraded when down). */
+export function registerLiveKitHealthCheck(healthCheck: () => Promise<boolean>): void {
+  registerHealthCheck(
+    "livekit",
+    async () => {
+      const start = Date.now();
+      try {
+        const healthy = await healthCheck();
+        return { healthy, latencyMs: Date.now() - start };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { healthy: false, latencyMs: Date.now() - start, error: message };
+      }
+    },
+    false
+  );
+}

@@ -13,6 +13,6 @@
     "lib": ["ESNext", "DOM"],
     "types": ["bun"]
   },
-  "include": ["packages/**/*"],
+  "include": ["packages/**/*", "apps/widget/**/*"],
   "exclude": ["node_modules", "packages/**/node_modules", "packages/**/__chaos__", "scripts"]
 }

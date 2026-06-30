@@ -1,10 +1,11 @@
-# AST Firewall Analysis — AI CRM (Implemented: Rules 20-25)
+# AST Firewall Analysis — AI CRM (Implemented: Rules 20-28)
 
 ## Summary
 - Constitutional gates extracted: 52
 - AST-enforceable gates: 31
-- Existing rules: 25 (was 19 — 6 new rules implemented 2026-06-30)
-- Gaps remaining: 0 actionable (6 deferred — naming conventions)
+- Existing rules: 28 (was 25 — Rules 26-28 + Rule 18 fix implemented 2026-06-30)
+- Gaps remaining: 0 actionable from constitutional analysis (6 deferred — naming conventions)
+- **Feature surface gaps (002-chat-widget): 0 remaining (5 implemented 2026-06-30)**
 - Drift warnings: 4 (unchanged)
 - Over-enforced: 0
 
@@ -136,3 +137,94 @@ For transparency, here's how the 52 gates were distributed across extraction mec
 | Naming convention tables | 7 | 5 (3 deferred) |
 | Architecture definitions | 5 | 3 |
 | **Total** | **52** | **31** |
+
+---
+
+## Feature Surface Gaps — 002-chat-widget (2026-06-30)
+
+**Source**: specs/002-chat-widget/plan.md
+**Surfaces analyzed**: 10 new files, 4 extended files
+**Tasks referenced**: yes (T007, T029, T032, T034, T040, T041, T043, T044, T049)
+**Research referenced**: yes (Cartesia STT endpoints, livekit-client constraint)
+
+### Surface Inventory
+
+| # | File | Surface Type | Untrusted Input | Lazy Shortcut | Cross-reference | Status |
+|---|---|---|---|---|---|---|
+| S1 | `scripts/widget-server.ts` | All rules | All HTTP inbound (JWT, JSON body, multipart, webhook) | Full rule set silently skipped — file not in scan paths | `resolveSourceFiles()` only adds `scripts/load-env.ts` | **META-GAP** |
+| S2 | `scripts/audio-utils.ts` | All rules | Node.js Buffer (PCM output) | Full rule set silently skipped | Same scan path exclusion | **META-GAP** |
+| S3 | `packages/ai-core/src/features/calls/clip-transcriber.ts` | WebSocket `.on('message')` callback | Cartesia STT JSON frames (`{type, text, isFinal}`) | `JSON.parse(e.data).text` — passes Rule 18 false-negative | Rule 18 checks `ce.getName()==='parse'`, which matches `JSON.parse` (not only Zod) | **GAP (Rule 18 false-negative)** |
+| S4 | `packages/ai-core/src/features/calls/clip-transcriber.ts` | `ws.onmessage` property assignment | Cartesia STT frames | `ws.onmessage = (e) => { JSON.parse(e.data) }` — property assignment, not CallExpression | Rule 18 targets `.on()/.subscribe()` CallExpression only | **GAP** |
+| S5 | `scripts/voice-agent.ts` (extended) | `JSON.parse` on metadata string | `ctx.job.metadata` (LiveKit dispatch, JSON payload) | `const { contactId } = JSON.parse(ctx.job.metadata)` without Zod | Rule 3 (fetch only), Rule 18 (.on/.subscribe only) | **GAP** |
+| S6 | `apps/widget/src/modes/voice.ts` (allowed) | `import 'livekit-client'` boundary | Browser SDK (dynamic import) | Agent copies `import { Room } from 'livekit-client'` into `scripts/` or `packages/` | No rule blocks `livekit-client` import outside `apps/widget/` | **GAP** |
+| S7 | `scripts/worker.ts` (extended) | `fetch()` — WhatsApp media download | WhatsApp Graph API response (`{url, mime_type}`) | `const { url } = await resp.json()` without Zod | Rule 3 covers this — IF worker.ts is in scan paths (META-GAP) | **COVERED*** |
+| S8 | `scripts/widget-server.ts` | `span.setAttribute()` OTel spans | N/A (attribute key leak) | `span.setAttribute('message', ...)` — PII key in span | Rule 13 covers this — IF widget-server.ts is in scan paths (META-GAP) | **COVERED*** |
+| S9 | `packages/ai-core/src/adapters/livekit/livekit-room.adapter.ts` | Adapter instantiation in core/ | N/A | `new LiveKitRoomAdapter()` in core/ | Rule 16 — `LiveKit` prefix detected | **COVERED** |
+| S10 | `packages/ai-core/src/features/calls/clip-transcriber.ts` | catch blocks | External WS errors | `catch(e)` without `: unknown` | Rule 4 — file is scanned | **COVERED** |
+
+*\* Covered only after META-GAP (S1/S2) is resolved by adding new scripts to scan paths.*
+
+### Gap Proposals (Rules to Add or Extend)
+
+| # | Proposed Rule Name | Domain | Surfaces | Pattern | Enforcement | Priority |
+|---|---|---|---|---|---|---|
+| 1 | **ScriptsScanPaths** | Structural (meta) | `scripts/widget-server.ts`, `scripts/audio-utils.ts` | `resolveSourceFiles()` only scans `scripts/load-env.ts` — all 25 rules silently skip new scripts | Extend `resolveSourceFiles()`: add `scripts/widget-server.ts` and `scripts/audio-utils.ts` to the explicit list (or switch to `scripts/**/*.ts` glob + exclusions) | **HIGH** |
+| 2 | **Rule18FalseNegativeFix** | Data-Flow | `clip-transcriber.ts`, any `.on('message')` WS callback | `JSON.parse(e.data)` in `.on()` callback satisfies Rule 18 today because `ce.getName()==='parse'` matches `JSON.parse` — not just Zod | Extend Rule 18: add guard `if (ce.getExpression().getText() === 'JSON') return false` before the `includes('parse')` check | **HIGH** |
+| 3 | **WsOnmessageZod** | Data-Flow | `clip-transcriber.ts` | `ws.onmessage = (e: MessageEvent) => { ... }` PropertyAssignment callback without Zod parse in body | New rule: scan `PropertyAssignment` where name is `onmessage`, `onerror`, or `on*` native WS event; require Zod `.parse()` in body | **HIGH** |
+| 4 | **JsonParseWithoutZod** | Data-Flow | `clip-transcriber.ts`, `voice-agent.ts`, `widget-server.ts` | Standalone `JSON.parse(externalVar)` where result is not immediately chained into `.parse()`/`.safeParse()` | Pattern-based: flag `JSON.parse(...)` CallExpression whose parent is not a Zod `.parse()` argument | **HIGH** |
+| 5 | **LiveKitClientBoundary** | Structural | `apps/widget/src/modes/voice.ts` (allowed), any other location (blocked) | `import ... from 'livekit-client'` or `import('livekit-client')` outside `apps/widget/` | Location-based: flag `livekit-client` import in any file whose `normalizedPath` does not include `apps/widget/` | **HIGH** |
+
+Priority:
+- **HIGH**: Data-Flow security, wrong-layer SDK import, scan path gaps that blind all rules
+- **MEDIUM**: Structural wrappers, resilience on new external calls
+- **LOW**: Naming, cosmetic
+
+### COVERED Surfaces (no new rules needed)
+
+| File | Surface | Existing Rule |
+|---|---|---|
+| `scripts/worker.ts` | `fetch()` WhatsApp media download without Zod | Rule 3 (requires scan path fix first) |
+| `scripts/widget-server.ts` | `span.setAttribute()` PII key guard | Rule 13 (requires scan path fix first) |
+| `packages/ai-core/src/adapters/livekit/livekit-room.adapter.ts` | Adapter file naming convention | Rule 24 |
+| `packages/ai-core/src/core/ports.ts` | `new LiveKitRoomAdapter()` blocked in core/ | Rule 16 |
+| `packages/ai-core/src/features/calls/clip-transcriber.ts` | `catch (e: unknown)` required | Rule 4 |
+| `packages/ai-core/src/config/startup-validator.ts` | `process.env` without fallback outside config/ | Rule 21 |
+
+### NOT AST-Enforceable (document only)
+
+| Surface | Reason |
+|---|---|
+| P95 SSE < 500ms (widget text) | Runtime metric |
+| P95 voice clip full response < 5s | Runtime metric |
+| STT-finalization → first TTS byte < 1.5s | Runtime metric — voice agent process |
+| WhatsApp audio reply < 10s | Runtime metric — async pipeline |
+| Agent joins room within 15s | Runtime / LiveKit dispatch timing |
+| Widget JS bundle ≤ 100 KB gzipped | Build CI constraint (bundlesize), not AST |
+| ffmpeg availability | Startup probe (T015), not an AST pattern |
+| LiveKit room auto-cleanup on empty | LiveKit Cloud behavior |
+| CORS `Access-Control-Allow-Origin` correctness | HTTP header value — runtime config |
+
+### Rule 18 False Negative — Detail
+
+Rule 18 (`WebSocketBoundary`) requires that `.on()/.subscribe()` callback bodies contain a call where `ce.getName() === 'parse'`. The bug: `JSON.parse(e.data)` is a `PropertyAccessExpression` where the property name is `"parse"`, so `ce.getName()` returns `"parse"` and the rule is silently satisfied. An agent writing:
+
+```typescript
+ws.on('message', (e) => {
+  const result = JSON.parse(e.data);  // NOT Zod — Rule 18 stays silent today
+  return result.text;
+});
+```
+
+...would not trigger Rule 18. Minimal fix in `rule18_WebSocketBoundary`:
+
+```typescript
+const hasZodParse = parseCalls.some(c => {
+  const ce = c.getExpression();
+  if (Node.isPropertyAccessExpression(ce)) {
+    // Exclude JSON.parse — that is NOT a schema validation
+    if (ce.getExpression().getText() === 'JSON') return false;
+    return ["parse", "parseAsync", "safeParse"].includes(ce.getName());
+  }
+  return ["parse", "parseAsync", "safeParse"].includes(ce.getText());
+});
+```

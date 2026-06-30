@@ -19,7 +19,11 @@ export const envSchema = z.object({
   LIVEKIT_URL: z.string().url(),
   LIVEKIT_API_KEY: z.string().min(3),
   LIVEKIT_SECRET: z.string().min(3),
+  LIVEKIT_WEBHOOK_SECRET: z.string().min(3).optional(),
   CARTESIA_API_KEY: z.string().startsWith("sk-"),
+  // Widget server (002-chat-widget)
+  WIDGET_SERVER_PORT: z.coerce.number().default(8290),
+  WIDGET_ALLOWED_ORIGINS: z.string().optional(),
   // WhatsApp
   WHATSAPP_API_TOKEN: z.string().min(10),
   WHATSAPP_PHONE_ID: z.string().min(10),

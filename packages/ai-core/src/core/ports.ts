@@ -195,3 +195,28 @@ export interface IDeadLetterQueue {
   /** Job handler registered via onReplay — invoked when replay() is called. */
   onReplay(handler: (job: Record<string, unknown>, queue: string) => Promise<void>): void;
 }
+
+// LiveKit widget voice (002-chat-widget)
+export interface LiveKitRoomDetails {
+  roomName: string;
+  participantToken: string;
+  serverUrl: string;
+}
+
+export interface AgentDispatchOptions {
+  contactId: string;
+  sessionId: string;
+}
+
+export interface LiveKitWebhookEvent {
+  event: string;
+  room?: { name?: string };
+  participant?: { identity?: string; kind?: string | number };
+}
+
+export interface ILiveKitRoomManager {
+  createWidgetRoom(options: AgentDispatchOptions): Promise<LiveKitRoomDetails>;
+  closeRoom(roomName: string): Promise<void>;
+  verifyWebhook(body: string, authHeader: string): Promise<LiveKitWebhookEvent>;
+  healthCheck(): Promise<boolean>;
+}

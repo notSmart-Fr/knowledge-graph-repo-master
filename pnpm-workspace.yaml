@@ -2,6 +2,7 @@ packages:
   - "packages/*"
   - "scripts"
   - "apps/*"
+  - "apps/widget"
 allowBuilds:
   esbuild: true
   protobufjs: true

@@ -155,7 +155,7 @@ Caller dials in ──► LiveKit room (WebRTC)
         ▼
 voice-agent.ts connects to room
         │
-        ├── Audio frames stream in (Deepgram STT)
+        ├── Audio frames stream in (Cartesia Sonic STT)
         │
 LOOP:   ├── Chunk transcribed → text
         │         │
@@ -380,8 +380,7 @@ Adapter call
                            │
                     ┌──────▼──────┐
                     │  LiveKit    │  50GB/month
-                    │  + Cartesia │  Voice only, low concurrent rooms
-                    │  + Deepgram │  200h free/month
+                    │  + Cartesia │  Sonic STT + TTS; voice only, low concurrent rooms
                     └─────────────┘
 ```
 

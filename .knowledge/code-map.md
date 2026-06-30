@@ -143,7 +143,7 @@ Caller dials → LiveKit room (WebRTC)
 │ STEP 1 — ROOM CONNECTION                       [PLANNED]         │
 │ scripts/voice-agent.ts                                            │
 │   • Connects to LiveKit room                                      │
-│   • Deepgram STT for real-time transcription                      │
+│   • Cartesia Sonic STT for real-time transcription                │
 │     └─ features/calls/call.transcriber.ts                         │
 └─────────────────────────────────────────────────────────────────┘
  │
@@ -283,7 +283,7 @@ scripts/seed.ts                                                 [PLANNED]
 | `features/tickets/ticket.types.ts` | [PLANNED] | Ticket type + status/priority enums. |
 | `features/tickets/ticket.tools.ts` | [PLANNED] | `getTickets`, `createTicket` tools. |
 | `features/calls/call.types.ts` | [PLANNED] | Call type + transcript json + sentiment. |
-| `features/calls/call.transcriber.ts` | [PLANNED] | Deepgram STT streaming adapter. |
+| `features/calls/call.transcriber.ts` | [PARTIAL] | Cartesia Sonic STT types + `ICartesiaTranscriber` contract. Impl in `scripts/voice-agent.ts`. |
 | `features/calls/call.summarizer.ts` | [PLANNED] | Post-call summarizer trigger. |
 | `features/pipeline/pipeline.types.ts` | [PLANNED] | PipelineStage type + ordered stages. |
 | `features/pipeline/pipeline.analyzer.ts` | [PLANNED] | Pipeline analyzer agent trigger. |
@@ -309,7 +309,7 @@ scripts/seed.ts                                                 [PLANNED]
 | File | Status | Role |
 |---|---|---|
 | `scripts/worker.ts` | [PLANNED] | WhatsApp webhook consumer (BullMQ). Wires idempotency, DLQ, circuit breaker. |
-| `scripts/voice-agent.ts` | [PLANNED] | LiveKit room agent. Wires Deepgram STT, Cartesia TTS, orchestrator. |
+| `scripts/voice-agent.ts` | [PARTIAL] | LiveKit room agent. Cartesia Sonic STT + TTS, orchestrator. |
 | `scripts/seed.ts` | [PLANNED] | Supabase seed data insertion. |
 | `scripts/ingest.ts` | [PLANNED] | Neo4j graph ingestion from Supabase seed data. |
 | `scripts/eval-rag.ts` | [PLANNED] | DeepEval RAG triad against golden dataset. |

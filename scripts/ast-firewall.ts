@@ -1,6 +1,6 @@
 // @ts-nocheck — IDE TS is 6.x, ts-morph is built against 5.x. Runs via `bun run`, not `tsc`.
 /**
- * AST Security Firewall v3 — 25 Rules, 7 Domains
+ * AST Security Firewall v3 — 28 Rules, 7 Domains
  *
  * Compile-time structural verification. Runs as a compiler step — no manual review.
  *
@@ -128,6 +128,48 @@ function hasSiblingParse(
   return false;
 }
 
+/** True when call is JSON.parse(...). */
+function isJsonParseCall(call: Node): boolean {
+  if (!Node.isCallExpression(call)) return false;
+  const expr = call.getExpression();
+  return (
+    Node.isPropertyAccessExpression(expr) &&
+    expr.getName() === "parse" &&
+    expr.getExpression().getText() === "JSON"
+  );
+}
+
+/** Schema.parse(JSON.parse(x)) — JSON.parse is a direct argument to Zod parse. */
+function isDirectZodParseArgument(jsonParse: Node): boolean {
+  if (!Node.isCallExpression(jsonParse)) return false;
+  let parent: Node | undefined = jsonParse.getParent();
+  if (!parent || !Node.isCallExpression(parent)) return false;
+  const outerExpr = parent.getExpression();
+  if (!Node.isPropertyAccessExpression(outerExpr)) return false;
+  return ["parse", "parseAsync", "safeParse"].includes(outerExpr.getName());
+}
+
+/**
+ * After `const v = JSON.parse(...)`, check whether a later statement feeds v
+ * into Schema.parse() / .safeParse() (same pattern as hasSiblingParse for fetch).
+ */
+function hasSiblingZodParse(jsonParseCall: Node): boolean {
+  return hasSiblingParse(jsonParseCall, ["parse", "parseAsync", "safeParse"]);
+}
+
+/** Zod parse in callback body — excludes JSON.parse false-positive. */
+function bodyHasZodParse(body: Node): boolean {
+  const parseCalls = body.getDescendantsOfKind(SyntaxKind.CallExpression);
+  return parseCalls.some((c) => {
+    const ce = c.getExpression();
+    if (Node.isPropertyAccessExpression(ce)) {
+      if (ce.getExpression().getText() === "JSON") return false;
+      return ["parse", "parseAsync", "safeParse"].includes(ce.getName());
+    }
+    return ["parse", "parseAsync", "safeParse"].includes(ce.getText());
+  });
+}
+
 // ── Violation collection (sorted output) ──────────────────────────────
 
 interface Violation {
@@ -218,8 +260,14 @@ function resolveSourceFiles(project: Project, isChaos: boolean, targetPath?: str
       project.addSourceFilesAtPaths([`${dir}/**/*.tsx`, `!${dir}/**/__chaos__/**`]);
     }
   }
-  // Scripts (only scan load-env.ts for now)
-  for (const script of ["scripts/load-env.ts"]) {
+  // Scripts
+  for (const script of [
+    "scripts/load-env.ts",
+    "scripts/widget-server.ts",
+    "scripts/audio-utils.ts",
+    "scripts/worker.ts",
+    "scripts/voice-agent.ts",
+  ]) {
     const abs = path.resolve(process.cwd(), script);
     if (fs.existsSync(abs)) project.addSourceFileAtPath(script);
   }
@@ -339,21 +387,91 @@ const rule18_WebSocketBoundary: RuleFn = (ctx) => {
     const bodyText = body.getText();
     if (!/payload|data|message|text|event|body/.test(bodyText)) continue;
 
-    // AST-based parse detection — catches both property access and destructured calls
-    const parseCalls = body.getDescendantsOfKind(SyntaxKind.CallExpression);
-    const hasZodParse = parseCalls.some(c => {
-      const ce = c.getExpression();
-      if (Node.isPropertyAccessExpression(ce)) {
-        return ["parse", "parseAsync", "safeParse"].includes(ce.getName());
-      }
-      return ["parse", "parseAsync", "safeParse"].includes(ce.getText());
-    });
-
-    if (!hasZodParse) {
+    if (!bodyHasZodParse(body)) {
       error(ctx, "Rule 18 WebSocket Boundary",
         `WebSocket/realtime handler ".${methodName}()" must Zod.parse() untrusted incoming payload. ` +
         `Untrusted WebSocket data cannot enter internal state raw — same as fetch() boundary.`);
     }
+  }
+};
+
+/**
+ * Constitutional source: Quality Gates — Zod boundary safety (WebSocket inbound)
+ * Domain: Data-Flow
+ * Lazy-agent shortcut: ws.onmessage = (e) => { JSON.parse(e.data) } — native API, not .on()
+ * Enforcement: pattern-based (onmessage PropertyAssignment only)
+ */
+const rule26_WsOnmessageZod: RuleFn = (ctx) => {
+  if (!ctx.fileText.includes("onmessage")) return;
+
+  const checkHandler = (handler: Node) => {
+    if (!Node.isArrowFunction(handler) && !Node.isFunctionExpression(handler)) return;
+    const body = (handler as { getBody?: () => Node }).getBody?.();
+    if (!body) return;
+    const bodyText = body.getText();
+    if (!/payload|data|message|text|event|body/.test(bodyText)) return;
+    if (!bodyHasZodParse(body)) {
+      error(ctx, "Rule 26 WS onmessage Zod",
+        `Native WebSocket "onmessage" handler must Zod.parse() untrusted incoming payload. ` +
+        `Use Schema.parse() on message data — JSON.parse() alone is not validation.`);
+    }
+  };
+
+  // ponytail: ws.onmessage = fn is BinaryExpression, not PropertyAssignment
+  for (const bin of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
+    if (bin.getOperatorToken().getKind() !== SyntaxKind.EqualsToken) continue;
+    const left = bin.getLeft();
+    if (!Node.isPropertyAccessExpression(left)) continue;
+    if (left.getName() !== "onmessage") continue;
+    const right = bin.getRight();
+    if (right) checkHandler(right);
+  }
+
+  for (const assign of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.PropertyAssignment)) {
+    if (assign.getName() !== "onmessage") continue;
+    const init = assign.getInitializer();
+    if (init) checkHandler(init);
+  }
+};
+
+/**
+ * Constitutional source: Development Standards — every external deserialization boundary validated
+ * Domain: Data-Flow
+ * Lazy-agent shortcut: const { contactId } = JSON.parse(ctx.job.metadata) without schema
+ * Enforcement: pattern-based (scope: scripts/, features/; exempt literals and JSON.stringify clone)
+ */
+const rule27_JsonParseWithoutZod: RuleFn = (ctx) => {
+  if (ctx.normalizedPath.includes("/__tests__/") || ctx.normalizedPath.includes("/__chaos__/")) return;
+  if (
+    !ctx.normalizedPath.startsWith("scripts/") &&
+    !ctx.normalizedPath.includes("/features/")
+  ) return;
+
+  for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (!isJsonParseCall(call)) continue;
+
+    const args = call.getArguments();
+    if (args.length > 0) {
+      const arg = args[0];
+      if (Node.isStringLiteral(arg) || Node.isNoSubstitutionTemplateLiteral(arg)) continue;
+      // ponytail: JSON.parse(JSON.stringify(x)) deep-clone — trusted round-trip, not external boundary
+      if (Node.isCallExpression(arg)) {
+        const innerExpr = arg.getExpression();
+        if (
+          Node.isPropertyAccessExpression(innerExpr) &&
+          innerExpr.getName() === "stringify" &&
+          innerExpr.getExpression().getText() === "JSON"
+        ) continue;
+      }
+    }
+
+    if (isDirectZodParseArgument(call)) continue;
+    if (hasAncestorCall(call, ["parse", "parseAsync", "safeParse"])) continue;
+    if (hasSiblingZodParse(call)) continue;
+
+    error(ctx, "Rule 27 JSON Parse Without Zod",
+      `JSON.parse() on external/untrusted data must be followed by Schema.parse() or .safeParse(). ` +
+      `Raw JSON deserialization cannot enter internal state without schema validation.`);
   }
 };
 
@@ -1099,7 +1217,7 @@ const rule16_PortInjection: RuleFn = (ctx) => {
   // or containing "Adapter" / "Encrypt" signals a concrete adapter.
   // Also catches well-known adapter prefixes (Supabase*, Neo4j*, Gemini*, etc.).
   const isAdapterName = (name: string): boolean => {
-    if (/^(Supabase|Neo4j|NoOp|Gemini|Cached|Mastra|DeepSeek|Redis|BullMQ|Ollama|Field|LiveKit|Cartesia|Deepgram)/.test(name)) return true;
+    if (/^(Supabase|Neo4j|NoOp|Gemini|Cached|Mastra|DeepSeek|Redis|BullMQ|Ollama|Field|LiveKit|Cartesia)/.test(name)) return true;
     if (name.endsWith("Store") || name.endsWith("Provider") || name.endsWith("Retriever")) return true;
     if (name.endsWith("FallbackProvider") || name.endsWith("AgentProvider") || name.endsWith("EmbeddingProvider")) return true;
     if (name.includes("Adapter") || name.includes("Encrypt")) return true;
@@ -1144,6 +1262,39 @@ const rule25_NoFeatureImports: RuleFn = (ctx) => {
 };
 
 /**
+ * Constitutional source: Port-Adapter Architecture — browser SDKs must not enter server-side code
+ * Domain: Structural
+ * Lazy-agent shortcut: import { Room } from 'livekit-client' copied into scripts/ or packages/
+ * Enforcement: location-based (allowed: apps/widget/ only)
+ */
+const rule28_LiveKitClientBoundary: RuleFn = (ctx) => {
+  if (ctx.normalizedPath.includes("apps/widget/")) return;
+
+  for (const imp of ctx.sourceFile.getImportDeclarations()) {
+    const spec = imp.getModuleSpecifierValue();
+    if (spec === "livekit-client" || spec.startsWith("livekit-client/")) {
+      error(ctx, "Rule 28 LiveKit Client Boundary",
+        `livekit-client is a browser SDK — import only from apps/widget/. ` +
+        `Server-side code must use livekit-server-sdk.`);
+    }
+  }
+
+  for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (call.getExpression().getKind() !== SyntaxKind.ImportKeyword) continue;
+    const args = call.getArguments();
+    if (args.length === 0) continue;
+    const arg = args[0];
+    if (!Node.isStringLiteral(arg) && !Node.isNoSubstitutionTemplateLiteral(arg)) continue;
+    const spec = Node.isStringLiteral(arg) ? arg.getLiteralValue() : arg.getLiteralText();
+    if (spec === "livekit-client" || spec.startsWith("livekit-client/")) {
+      error(ctx, "Rule 28 LiveKit Client Boundary",
+        `Dynamic import('livekit-client') is allowed only in apps/widget/. ` +
+        `Server-side code must use livekit-server-sdk.`);
+    }
+  }
+};
+
+/**
  * Constitutional source: Development Standards / Naming Conventions —
  *   "Adapter files: *.adapter.ts in adapters/<domain>/"
  * Domain: Structural
@@ -1180,6 +1331,8 @@ const ALL_RULES: RuleFn[] = [
   rule2_AntiCheat,
   rule3_BoundaryZodWrap,
   rule18_WebSocketBoundary,
+  rule26_WsOnmessageZod,
+  rule27_JsonParseWithoutZod,
   // Domain B: Error & Resilience
   rule4_CatchTypeGuard,
   rule5_DataErrorPII,
@@ -1206,6 +1359,7 @@ const ALL_RULES: RuleFn[] = [
   // Domain G: Architecture Enforcement
   rule16_PortInjection,
   rule25_NoFeatureImports,
+  rule28_LiveKitClientBoundary,
   rule24_AdapterNaming,
 ];
 
@@ -1260,7 +1414,7 @@ async function executeSweep(targetPath?: string): Promise<boolean> {
   );
 
   if (passed) {
-    console.log("✅ All 25 firewall rules passed. Build allowed.\n");
+    console.log(`✅ All ${ALL_RULES.length} firewall rules passed. Build allowed.\n`);
   } else {
     console.error(
       `\n🚨 BUILD BLOCKED: ${totalViolations.count} structural security violation(s) found across ${sourceFiles.length} file(s).\n`,
