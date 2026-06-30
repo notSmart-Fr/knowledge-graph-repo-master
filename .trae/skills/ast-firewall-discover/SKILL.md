@@ -88,7 +88,9 @@ Read the constitution. Extract every quality gate. A "quality gate" is ANY state
 4. **Quality Gates tables** — any table with a "Rule"/"Requirement" column (e.g., "No any types | < 5 allowed")
 5. **"Rule | Implementation" tables** — any table with a "Rule" column (e.g., "All errors must be typed | Custom error classes")
 6. **Naming convention tables** — explicit file/class/function naming patterns (e.g., "Adapter files | *.adapter.ts")
-7. **Architecture definitions** — "What lives here:" sections that declare directory roles
+7. **Architecture definitions** — "What lives here:" sections that declare directory roles, AND any prose that describes what a directory, layer, or module is responsible for (e.g., "The /adapters directory handles all infrastructural translations so that our core domain logic remains decoupled from third-party APIs")
+
+**Implicit Constraint Derivation Rule**: For any directory role definition (explicit or prose-implied), derive the implicit constraint: *If X is defined as the sole place for Y, then Y found outside of X is a violation.* Example: if `/adapters` is described as the sole layer that talks to third-party SDKs, then `import { PrismaClient } from '@prisma/client'` in `/core/` is a structural violation — even if the constitution never said "MUST NOT import SDKs in core."
 
 For each extracted gate, normalize it to a single sentence: what pattern must or must not exist in code.
 

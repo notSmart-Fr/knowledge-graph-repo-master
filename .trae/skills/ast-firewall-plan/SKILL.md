@@ -34,11 +34,28 @@ Read these files (absolute paths from repo root):
 
 ### Phase 1: Validate the Input
 
-Read `.knowledge/ast-firewall-analysis.md`. Verify every gap/rule has:
+Read `.knowledge/ast-firewall-analysis.md`. The analysis contains up to five categories of work items. Verify each has the required fields:
+
+**Gaps (Rules to Add)** — verify each has:
 - Constitutional gate reference
 - Safety domain
 - Lazy-agent shortcut
 - Enforcement strategy (pattern-based or location-based with scope)
+
+**Drift Warnings (Rules to Review)** — verify each has:
+- Rule number
+- Drift type (`Scope Drift` or `Stack Drift`)
+- Warning description
+- Suggested action
+
+**Documentation Gaps (UNDOCUMENTED_MATCH)** — verify each has:
+- Rule number
+- Targeted SyntaxKind
+- Missing metadata (which JSDoc tags are absent)
+
+**Over-Enforced** — verify each has rule number and reason.
+
+**Deferred (discover output only)** — verify each has gate and deferral reason.
 
 Mark incomplete entries as "NEEDS CLARIFICATION" and skip them — they stay as unresolved analysis items.
 
@@ -69,6 +86,15 @@ For updates to existing rules:
 
 For removals:
 - Identify function to delete + ALL_RULES entry to remove
+
+For documentation fixes (UNDOCUMENTED_MATCH):
+- Rule number to annotate
+- Which JSDoc tags to add (`@domain`, `@gate`, `Constitutional source:`, `Lazy-agent shortcut:`)
+- No logic changes — JSDoc only
+
+For drift fixes:
+- Scope Drift: exact path string replacement (old directory → new directory)
+- Stack Drift: deprecate (remove function + ALL_RULES entry) or update pattern to match current stack
 
 ### Phase 5: Generate Implementation Tasks
 
@@ -103,6 +129,20 @@ Derived from `.knowledge/ast-firewall-analysis.md` on [date]
 
 ### Update Existing Rules
 - [ ] Task U1: Update Rule N — [change description]
+
+### Fix Documentation Gaps (UNDOCUMENTED_MATCH)
+- [ ] Task D1: Add JSDoc to Rule N — missing: [@domain, @gate, Constitutional source, Lazy-agent shortcut]
+  - Targeted SyntaxKind: [from analysis]
+  - No logic changes — JSDoc metadata only
+
+### Fix Scope Drift
+- [ ] Task S1: Update Rule N path scope — [old path] → [new path]
+  - Reason: [directory removed/renamed]
+
+### Resolve Stack Drift (Dead Rules)
+- [ ] Task K1: Deprecate Rule N — [reason: guarded pattern no longer exists in codebase]
+  - Action: remove function + ALL_RULES entry
+- [ ] Task K2: Update Rule N pattern — [old pattern] → [new pattern] to match current stack
 
 ### Remove Rules
 - [ ] Task R1: Remove Rule N — [reason]

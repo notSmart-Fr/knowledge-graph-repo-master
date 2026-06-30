@@ -59,10 +59,13 @@ const ruleN_DescriptiveName: RuleFn = (ctx) => {
 ### Phase 1: Parse the Plan
 
 Read `.knowledge/ast-firewall-plan.md`. Extract:
-- New helper functions to add
-- New rules to add (per domain, with task IDs)
-- Existing rules to update
-- Existing rules to remove
+- New helper functions to add (Task H*)
+- New rules to add (Task A*-E* per domain)
+- Existing rules to update (Task U*)
+- Existing rules to remove (Task R*)
+- Documentation fixes — JSDoc-only additions (Task D*)
+- Scope drift fixes — path/pattern updates (Task S*)
+- Stack drift resolution — deprecate or update dead rules (Task K*)
 
 ### Phase 2: Baseline Check
 
@@ -84,17 +87,37 @@ For each new rule in task order:
 
 For each update task: read the existing rule, apply the specified change, preserve rule number and JSDoc structure.
 
-### Phase 6: Remove Dead Rules
+### Phase 6: Fix Documentation Gaps
+
+For each D-task (UNDOCUMENTED_MATCH rules from the analysis):
+1. Locate the rule function in `ast-firewall.ts`
+2. Add the missing JSDoc block above the function with the metadata from the plan:
+   - `Constitutional source:` clause reference from constitution
+   - `@domain` tag with the safety domain
+   - `Lazy-agent shortcut:` description of the violation pattern
+   - `Enforcement:` pattern-based or location-based with scope
+3. Do NOT change any rule logic — this is a metadata-only change
+4. Do NOT change the rule number
+
+### Phase 7: Fix Scope Drift
+
+For each S-task (stale directory paths or naming conventions):
+1. Locate the rule function
+2. Update the hardcoded path string or file-name convention in `ctx.normalizedPath` checks (e.g., `includes("/old-dir/")` → `includes("/new-dir/")`)
+3. Verify the new path exists in the repository layout
+4. Run `pnpm check` to confirm the rule still fires on the intended scope
+
+### Phase 8: Remove Dead Rules
 
 For each removal task: delete the function body, remove from ALL_RULES. Do NOT renumber remaining rules.
 
-### Phase 7: Validation
+### Phase 9: Validation
 
 1. Run `pnpm check` — must pass with 0 violations
 2. If violations on existing code: the rule scope is too wide, narrow it
 3. Create chaos tests: write intentional violations in a test file, verify they're caught
 
-### Phase 8: Update Documentation
+### Phase 10: Update Documentation
 
 1. Create or update `.knowledge/ast-decisions.md` — add project-specific rule-to-constitution mapping for new rules
 2. Mark all tasks in `.knowledge/ast-firewall-plan.md` as `[X]`
