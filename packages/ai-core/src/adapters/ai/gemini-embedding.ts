@@ -13,7 +13,7 @@ const MAX_RETRIES = 3;
 const RETRYABLE_STATUSES = [429, 500, 502, 503, 504];
 
 export class GeminiEmbeddingProvider implements IEmbeddingProvider {
-  private readonly API_URL = "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent";
+  private readonly API_URL = env.GEMINI_API_URL + "/v1beta/models/text-embedding-004:embedContent";
 
   async embed(text: string): Promise<number[]> {
     try {
@@ -36,6 +36,7 @@ export class GeminiEmbeddingProvider implements IEmbeddingProvider {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: { parts: [{ text }] } }),
+        signal: AbortSignal.timeout(10_000),
       },
     );
 

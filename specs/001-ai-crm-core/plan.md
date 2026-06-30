@@ -34,9 +34,9 @@ Build a production-grade AI CRM with hybrid hexagonal architecture. The system c
 | Principle | Status | Evidence |
 |---|---|---|
 | I. Port-Adapter Architecture | **PASS** | All 11 port interfaces in `core/ports.ts`. Orchestrator depends only on interfaces. Adapters in `adapters/` implement ports. Verified by Tasks 1.2, 2.x. |
-| II. Graceful Degradation | **PASS** | Circuit breaker in `core/circuit-breaker.ts`. Fallback chain: Gemini → DeepSeek → Ollama → cache. NoOp retriever for Neo4j degradation. Verified by Task 5.2-5.4 (pending). |
+| II. Graceful Degradation | **PASS** | Circuit breaker in `core/circuit-breaker.ts`. Fallback chain: Ollama → cached response → polite fallback (cloud APIs Gemini/DeepSeek inserted when configured). NoOp retriever for Neo4j degradation. Verified by Task 5.2-5.4 (pending). |
 | III. PII Security by Default | **PASS** | AES-256-GCM + HKDF in `adapters/encryption/`. Zero PII in logs/errors via `IntegrationError` PII-strip. `validateAndFilterOutput()` on all AI output. Verified by Tasks 1.3, 1.5, 6.x. |
-| IV. Compile-Time Safety (AST Firewall) | **PASS** | 19-rule firewall. `pnpm run check` blocks on violations. Scan paths cover `features/`, `adapters/`, `core/`, `agents/`. Verified by Task 14 (pending re-sweep). |
+| IV. Compile-Time Safety (AST Firewall) | **PASS** | 25-rule firewall. `pnpm run check` blocks on violations. Scan paths cover `features/`, `adapters/`, `core/`, `agents/`. Verified by Task 14 (pending re-sweep). |
 | V. Observability-Driven Operations | **PASS** | OTel spans per pipeline step (max 8/request). Structured JSON logs with `trace_id`. Health on :8280. Metrics families defined. Verified by Tasks 8, 10. |
 
 **Constitution gates all pass.** No violations. No complexity tracking entries needed.

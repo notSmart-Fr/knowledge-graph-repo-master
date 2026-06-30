@@ -139,7 +139,7 @@ An admin reviews audit logs, verifies sensitive data encryption is active, and c
 - **FR-004**: System MUST generate AI responses that reference by-name the following CRM context fields when present: contact name, open deal titles with pipeline stages, current account health score, and the 3 most recent ticket subjects. If any field is absent (e.g., contact has no deals), the response MUST omit that field gracefully without hallucinating data.
 - **FR-005**: System MUST prevent duplicate processing of incoming messages using idempotency keys with a 5-minute TTL
 - **FR-006**: System MUST encrypt sensitive personal fields (phone, email, transcript) at rest and decrypt only in-memory at read time
-- **FR-007**: System MUST fall back to alternative AI providers when the primary provider fails, without dropping the user request
+- **FR-007**: System MUST fall back through the AI provider chain when the primary provider fails, without dropping the user request. The default chain is local model → cached response; cloud API providers are inserted as intermediary fallbacks when configured.
 - **FR-008**: System MUST skip knowledge graph expansion and use primary database plus cached context when the graph service is unreachable (graceful degradation)
 - **FR-009**: System MUST log all CRM data access to an immutable audit trail with actor ID, role, action, entity, timestamp, and IP address
 - **FR-010**: System MUST expose health (liveness) and readiness (degradation status) endpoints for traffic routing
@@ -185,8 +185,7 @@ An admin reviews audit logs, verifies sensitive data encryption is active, and c
 - Cloud service free tiers (database 500 MB storage, graph database 200 MB, voice platform 50 GB/month) are sufficient for initial operation
 - WhatsApp message delivery is reliable; the platform may redeliver the same message but won't silently drop messages
 - The encryption key is stored securely in the deployment environment, never in code or version control
-- A local AI model option is available as an optional third-tier fallback but not required for production
+- The primary AI provider is a local model running on-premise or in the deployment environment; cloud-based large language models are optional fallbacks enabled only when the corresponding API keys are configured. The default fallback chain is: local model → cached response → polite fallback. Cloud APIs (Gemini, DeepSeek) may be inserted into the chain based on environment configuration.
 - Privacy regulation compliance (GDPR-style data access and erasure requests) is gated behind the `DSAR_ENABLED` env var, not active for initial launch. The encryption architecture and immutable audit logs support full DSAR without data model retrofitting.
 - The dashboard is read-only; all data mutations happen through the WhatsApp and voice channels
-- Primary AI provider is a cloud-based large language model; a secondary cheaper provider and a local model option form the full fallback chain
 - The knowledge graph is hosted on a managed cloud service with 200 MB storage and 50,000 node limits

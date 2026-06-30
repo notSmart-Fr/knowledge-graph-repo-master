@@ -3,6 +3,7 @@ import { OrchestratorResponseSchema } from "../../core/ports.js";
 import { env } from "../../config/env-schema.js";
 import { IntegrationError } from "../../core/errors.js";
 import { DeepSeekFallbackProvider } from "./deepseek-fallback.js";
+import { OllamaLocalProvider } from "./ollama-local.js";
 import { z } from "zod";
 
 const GeminiGenerateContentResponseSchema = z.object({
@@ -41,7 +42,7 @@ const GeminiStreamChunkSchema = z.object({
   ).optional(),
 });
 
-function buildPrompt(context: CRMGraphContext): string {
+export function buildPrompt(context: CRMGraphContext): string {
   let prompt = "You are a helpful CRM assistant. ";
   if (context.contact) {
     prompt += `\nContact: ${context.contact.name}`;
@@ -57,15 +58,22 @@ function buildPrompt(context: CRMGraphContext): string {
 }
 
 async function generateWithGemini(context: CRMGraphContext): Promise<OrchestratorResponse> {
+  if (!env.GEMINI_API_KEY) {
+    throw new IntegrationError(
+      "GEMINI_NOT_CONFIGURED",
+      "Gemini API key is not configured"
+    );
+  }
   const prompt = buildPrompt(context);
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${env.GEMINI_API_KEY}`,
+    `${env.GEMINI_API_URL}/v1beta/models/gemini-2.0-flash:generateContent?key=${env.GEMINI_API_KEY}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
       }),
+      signal: AbortSignal.timeout(10_000),
     }
   );
 
@@ -107,15 +115,22 @@ function parseStreamChunk(line: string): string | null {
 }
 
 async function* streamFromGemini(context: CRMGraphContext): AsyncIterable<string> {
+  if (!env.GEMINI_API_KEY) {
+    throw new IntegrationError(
+      "GEMINI_NOT_CONFIGURED",
+      "Gemini API key is not configured"
+    );
+  }
   const prompt = buildPrompt(context);
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=${env.GEMINI_API_KEY}`,
+    `${env.GEMINI_API_URL}/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=${env.GEMINI_API_KEY}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
       }),
+      signal: AbortSignal.timeout(30_000),
     }
   );
 
@@ -153,40 +168,65 @@ async function* streamFromGemini(context: CRMGraphContext): AsyncIterable<string
   }
 }
 
+// Simple wrapper for Gemini provider so it fits the same interface as Ollama/DeepSeek
+class GeminiProvider implements IAgentProvider {
+  async generate(context: CRMGraphContext): Promise<OrchestratorResponse> {
+    return generateWithGemini(context);
+  }
+  async *generateStream(context: CRMGraphContext): AsyncIterable<string> {
+    yield* streamFromGemini(context);
+  }
+}
+
 export class MastraAgentProvider implements IAgentProvider {
-  private fallback?: DeepSeekFallbackProvider;
+  private providers: IAgentProvider[] = [];
 
   constructor() {
+    // Order of preference: Ollama first, then Gemini, then DeepSeek
+    if (env.LOCAL_LLM_URL) {
+      this.providers.push(new OllamaLocalProvider());
+    }
+    if (env.GEMINI_API_KEY) {
+      this.providers.push(new GeminiProvider());
+    }
     if (env.DEEPSEEK_API_KEY) {
-      this.fallback = new DeepSeekFallbackProvider();
+      this.providers.push(new DeepSeekFallbackProvider());
     }
   }
 
   async generate(context: CRMGraphContext, tools?: unknown[]): Promise<OrchestratorResponse> {
-    try {
-      const response = await generateWithGemini(context);
-      return OrchestratorResponseSchema.parse(response);
-    } catch (err: unknown) {
-      if (this.fallback) {
-        return this.fallback.generate(context, tools);
+    let lastError: unknown = null;
+    for (const provider of this.providers) {
+      try {
+        const response = await provider.generate(context, tools);
+        return OrchestratorResponseSchema.parse(response);
+      } catch (err: unknown) {
+        lastError = err;
+        continue;
       }
-      throw new IntegrationError(
-        "AGENT_GENERATION_FAILED",
-        "Failed to generate response",
-        { originalError: String(err) },
-      );
     }
+    // If no providers worked or configured
+    throw new IntegrationError(
+      "AGENT_GENERATION_FAILED",
+      "Failed to generate response (no working providers configured)",
+      { originalError: String(lastError || "No providers configured") },
+    );
   }
 
   async *generateStream(context: CRMGraphContext, tools?: unknown[]): AsyncIterable<string> {
-    try {
-      yield* streamFromGemini(context);
-    } catch (err: unknown) {
-      if (this.fallback) {
-        yield* this.fallback.generateStream(context, tools);
-      } else {
-        throw err;
+    let lastError: unknown = null;
+    for (const provider of this.providers) {
+      try {
+        yield* provider.generateStream(context, tools);
+        return;
+      } catch (err: unknown) {
+        lastError = err;
+        continue;
       }
     }
+    throw lastError || new IntegrationError(
+      "AGENT_STREAM_FAILED",
+      "Failed to stream response (no working providers configured)"
+    );
   }
 }

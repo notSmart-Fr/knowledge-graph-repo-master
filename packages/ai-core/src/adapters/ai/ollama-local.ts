@@ -2,10 +2,20 @@ import type { IAgentProvider, CRMGraphContext, OrchestratorResponse } from "../.
 import { OrchestratorResponseSchema } from "../../core/ports.js";
 import { env } from "../../config/env-schema.js";
 import { IntegrationError } from "../../core/errors.js";
+import { buildPrompt } from "./mastra-agent.js";
 import { z } from "zod";
 
 const OllamaGenerateResponseSchema = z.object({
   response: z.string().optional(),
+});
+
+const OllamaStreamChunkSchema = z.object({
+  response: z.string().optional(),
+  done: z.boolean().optional(),
+});
+
+const OllamaResponseOkSchema = z.object({
+  ok: z.literal(true),
 });
 
 export class OllamaLocalProvider implements IAgentProvider {
@@ -22,9 +32,10 @@ export class OllamaLocalProvider implements IAgentProvider {
         await fetch(`${env.LOCAL_LLM_URL}/api/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(10_000),
           body: JSON.stringify({
             model: "llama3.2",
-            prompt: "You are a helpful CRM assistant. Please respond.",
+            prompt: buildPrompt(context),
             stream: false,
           }),
         }).then(async (response) => {
@@ -41,7 +52,7 @@ export class OllamaLocalProvider implements IAgentProvider {
       return OrchestratorResponseSchema.parse({
         text: data.response || "No response from local LLM",
         metadata: {
-          degraded: true,
+          degraded: false,
           cacheHit: false,
           modelUsed: "ollama/llama3.2",
         },
@@ -57,7 +68,60 @@ export class OllamaLocalProvider implements IAgentProvider {
   }
 
   async *generateStream(context: CRMGraphContext, tools?: unknown[]): AsyncIterable<string> {
-    const response = await this.generate(context, tools);
-    yield response.text;
+    if (!env.LOCAL_LLM_URL) {
+      throw new IntegrationError(
+        "OLLAMA_NOT_CONFIGURED",
+        "Local LLM URL is not configured"
+      );
+    }
+
+    const response = await fetch(`${env.LOCAL_LLM_URL}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "llama3.2",
+        prompt: buildPrompt(context),
+        stream: true,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!response.ok) {
+      throw new IntegrationError(
+        "OLLAMA_STREAM_FAILED",
+        `Ollama stream failed: ${response.statusText}`
+      );
+    }
+
+    // Firewall boundary: validate the response is ok before reading the stream body
+    OllamaResponseOkSchema.parse(response);
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new IntegrationError("OLLAMA_STREAM_FAILED", "No response body");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const chunk = OllamaStreamChunkSchema.parse(JSON.parse(line));
+          if (chunk.response) yield chunk.response;
+          if (chunk.done) break;
+        } catch {
+          continue;
+        }
+      }
+    }
   }
 }

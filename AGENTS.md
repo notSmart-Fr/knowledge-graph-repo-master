@@ -46,10 +46,40 @@ scripts/           — worker.ts, voice-agent.ts, seed.ts, ingest.ts, eval-rag.t
 
 ## Agent Guidelines
 
+### Before Writing
+
 - **Unknown fixes → search the internet first.** Use `WebSearch` before guessing. Cite sources when applying external solutions.
 - **Use MCP codebase-memory tools whenever possible.** Before reading files or exploring the codebase, use `search_graph`, `query_graph`, `search_code`, `trace_path`, or `get_code_snippet` from the `mcp_codebase-memory-mcp` server. These tools understand the project's 734-node/1258-edge knowledge graph and can surface relationships that file-by-file reading would miss. Fall back to `Grep`/`Glob`/`Read` only when MCP tools don't cover the query shape.
 - **Never modify `.vscode/mcp.json`** — user must handle MCP server config changes manually.
 - **Prefer existing patterns.** Check `code-map.md` and `architecture.md` in `.knowledge/` before writing new code.
+- **Read the constitution first.** `.specify/memory/constitution.md` — 6 principles, SLA gates, timeout standards, naming conventions. Non-negotiable.
+- **Check `core/ports.ts` before adding new I/O.** Does a port already define this interface? Reuse it.
+- **Check existing adapters before writing new ones.** `adapters/` directory — don't duplicate.
+
+### While Writing
+
+- **Every `fetch()`**: wrap result in `Schema.parse()` or `Schema.safeParse()`.
+- **Every new file in `core/`**: must NOT import from `adapters/` or framework packages.
+- **Every catch block**: variable must be `: unknown`, must have >=1 statement in body, no `as any` cast.
+- **Every error log**: no PII-named variables (`phone`, `email`, `transcript`, `password`, `token`, `secret`, `api_key`, `access_key`, `private_key`).
+- **Every `new Agent()`**: must include `maxSteps` between 1 and 10.
+- **Every `createTool()`**: must include `id` (lowercase slug), `description` (>=20 chars), `inputSchema`.
+- **Every new adapter**: implements exactly one port interface from `core/ports.ts`.
+- **Every adapter call in orchestrator**: wrap in circuit breaker (`breaker.invoke()`).
+- **Every Cypher query**: use `$param` placeholders, never `${}` interpolation.
+- **Every `createCipheriv()`**: algorithm must be `"aes-256-gcm"`.
+- **Every AI output**: pass through sanitizer before storage or user-facing return.
+- **Every exported function in `core/` or `adapters/` calling external services**: wrap in `tracer.startActiveSpan()`.
+- **Respect timeouts** per constitution II-a: 5s DB, 10s AI, 3s Redis, 30s STT/TTS.
+- **Follow naming conventions** per constitution: `*.port.ts`, `*.adapter.ts`, `*.test.ts`, `I*Store`/`I*Provider` interfaces.
+
+### After Writing
+
+- Run `pnpm check` — 0 firewall violations required.
+- Run `pnpm test` — 0 failures required. **Do NOT run `npx vitest` or `vitest` directly** — use the workspace root `pnpm test` script (`pnpm --filter @dtc/ai-core exec vitest run`).
+- If you added a new adapter: does it have a contract test?
+- If you added a new schema: does it have a schema test?
+- If you changed behavior: did you update the relevant spec or data-model doc?
 
 ## Spec Environment (Speckit)
 

@@ -2,7 +2,10 @@ import type { ICacheStore, CachedResponse, OrchestratorResponse } from "../../co
 import { CachedResponseSchema, OrchestratorResponseSchema } from "../../core/ports.js";
 import { supabaseServiceClient } from "./client.js";
 import { CacheError } from "../../core/errors.js";
+import { createLogger } from "../../core/logger.js";
 import { createHash } from "node:crypto";
+
+const log = createLogger("pgvector-cache");
 
 const EVICTION_DAYS = 30;
 const CACHE_THRESHOLD = 0.05;
@@ -19,7 +22,7 @@ export class PgVectorCache implements ICacheStore {
     } catch (err: unknown) {
       // ponytail: eviction failure must not break the read path; it will retry
       // on the next call. A scheduled pg_cron job would be the upgrade path.
-      console.warn("[PgVectorCache] Eviction failed", err);
+      log.warn("Eviction failed", { error: String(err) });
     }
   }
 

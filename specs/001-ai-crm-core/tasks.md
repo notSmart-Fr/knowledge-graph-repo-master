@@ -23,7 +23,7 @@
 ### Orchestrator Pipeline
 
 - [x] T001 Build circuit breaker wrapper in `packages/ai-core/src/core/circuit-breaker.ts` (3 consecutive failures → open 30s → half-open probe, ephemeral per-process state, concurrent probe guard: first wins, others wait 5s)
-- [x] T002 [P] Implement startup validator in `packages/ai-core/src/config/startup-validator.ts` (check all 6: SUPABASE_URL, NEO4J_URI, REDIS_URL, GEMINI_API_KEY, ENCRYPTION_MASTER_KEY, BULLMQ config — crash on missing)
+- [x] T002 [P] Implement startup validator in `packages/ai-core/src/config/startup-validator.ts` (check: SUPABASE_URL, NEO4J_URI, REDIS_URL, ENCRYPTION_MASTER_KEY, BULLMQ config — crash on missing. GEMINI_API_KEY and DEEPSEEK_API_KEY are optional — only required when LOCAL_LLM_URL is not set)
 - [x] T003 [P] Implement health router in `packages/ai-core/src/health/health-router.ts` (GET /health returns `{"status":"ok"}`, GET /ready returns `{"status":"healthy|degraded","failures":[...],"timestamp":"..."}` on port 8280)
 - [x] T004 [P] Implement per-adapter health checks in `packages/ai-core/src/health/health-checks.ts` (ping Supabase, Neo4j, Redis — each returns latency_ms and healthy/degraded/down, consumed by /ready)
 - [x] T005 Build orchestrator pipeline in `packages/ai-core/src/core/orchestrator.ts` (8-step: hydrate session → check cache → lookup contact → expand graph → call agent → sanitize output → store cache → append session. Each step wrapped in OTel span, max 8 spans/request)
@@ -113,10 +113,11 @@
 - [x] T032 [US4] Implement idempotency fallback chain in `packages/ai-core/src/adapters/messaging/idempotency.ts` (Redis `SET NX EX 300` → Supabase `idempotency_keys` INSERT ON CONFLICT → at-least-once, mark `idempotencyDegraded: true` on Supabase fallback)
 - [x] T033 [US4] Wire all degradation metadata into `OrchestratorResponse.metadata` (populate `DegradationDescriptor` fields: primaryModelFailed, graphSkipped, cacheFallbackUsed, idempotencyDegraded, activeCircuitBreakers list)
 - [x] T033a [P] [US4] Implement DLQ operator lifecycle in `packages/ai-core/src/adapters/messaging/dead-letter-queue.ts` (IDeadLetterQueue contract: `enqueue(msg, error)` → BullMQ, `listDead(limit, offset)` → paginated list, `replay(jobId)` → re-process single job, `purge()` → clear all. Admin endpoint on /ready exposes current DLQ depth)
+- [x] T033b [P] [US4] Rewire MastraAgentProvider in `packages/ai-core/src/adapters/ai/mastra-agent.ts` to use Ollama as primary when `LOCAL_LLM_URL` is set, with cloud APIs (Gemini/DeepSeek) as optional fallbacks only when their API keys are present. Per spec assumption: default chain is Ollama → cached response → polite fallback.
 
 ### Verification (US4)
 
-- [x] T034 [US4] Run degradation scenario tests: (a) Neo4j down → graphSkipped=true, contact-only response. (b) Gemini+DeepSeek down → cache hit or polite fallback. (c) Redis down → Supabase idempotency. Verify zero dropped requests, no customer-facing errors
+- [x] T034 [US4] Run degradation scenario tests: (a) Neo4j down → graphSkipped=true, contact-only response. (b) Ollama down + no cloud keys → cache hit or polite fallback. (c) Redis down → Supabase idempotency. Verify zero dropped requests, no customer-facing errors
 
 ---
 
@@ -146,7 +147,7 @@
 
 ### Verification (US5)
 
-- [ ] T041 [US5] Run `pnpm exec vitest run` for encryption: encrypt→decrypt roundtrip, verify PII fields are ciphertext in DB, verify key rotation re-encrypts on read. Run audit log test: verify INSERT succeeds with actor fields, verify UPDATE/DELETE blocked by RLS. Verify audit_logs table has 90-day retention policy and no UPDATE/DELETE grants. Verify `GET /audit?entity=contact&id=X&from=90d` returns complete trail (SC-008)
+- [ ] T041 [US5] Run `pnpm test` for encryption: encrypt→decrypt roundtrip, verify PII fields are ciphertext in DB, verify key rotation re-encrypts on read. Run audit log test: verify INSERT succeeds with actor fields, verify UPDATE/DELETE blocked by RLS. Verify audit_logs table has 90-day retention policy and no UPDATE/DELETE grants. Verify `GET /audit?entity=contact&id=X&from=90d` returns complete trail (SC-008)
 
 ---
 
@@ -158,7 +159,7 @@
 
 ### Quality Gates
 
-- [ ] T042 Run `pnpm check` full AST firewall re-sweep across all new files (19 rules, 0 violations required — scan `core/orchestrator.ts`, `agents/`, `config/`, `health/`, `scripts/`, `apps/web/`)
+- [ ] T042 Run `pnpm check` full AST firewall re-sweep across all new files (25 rules, 0 violations required — scan `core/orchestrator.ts`, `agents/`, `config/`, `health/`, `scripts/`, `apps/web/`)
 - [ ] T043 [P] Build SLA gate validation script in `scripts/validate.ts` (checks: cache hit rate >=30%, idempotency hit rate <=5%, no breaker >60s, DLQ depth <50, AI failure rate <5%, health P95 <500ms — all rolling windows)
 - [ ] T043a [P] Instrument free tier budget counters per constitution telemetry budget table: Supabase storage bytes gauge, Neo4j node + relationship count gauge, LiveKit bandwidth bytes counter. Wire into `/ready` and `scripts/validate.ts` to alert at 80% threshold
 - [ ] T044 [P] Build RAG triad evaluation script in `scripts/eval-rag.ts` (DeepEval on 50-example golden dataset: faithfulness >=0.90, answer relevancy >=0.85, context precision >=0.85)

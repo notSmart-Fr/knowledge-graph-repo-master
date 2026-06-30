@@ -40,7 +40,7 @@ export function renderCacheCard(root: HTMLElement): void {
 
   const poll = async (): Promise<void> => {
     try {
-      const res = await fetch(READY_URL, { method: "GET" });
+      const res = await fetch(READY_URL, { method: "GET", signal: AbortSignal.timeout(5_000) });
       if (!res.ok) {
         render(card, activeCallsCard, store.getState().cache, store.getState().activeCalls, true);
         return;

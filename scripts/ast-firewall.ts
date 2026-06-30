@@ -1,6 +1,6 @@
 // @ts-nocheck — IDE TS is 6.x, ts-morph is built against 5.x. Runs via `bun run`, not `tsc`.
 /**
- * AST Security Firewall v3 — 19 Rules, 7 Domains
+ * AST Security Firewall v3 — 25 Rules, 7 Domains
  *
  * Compile-time structural verification. Runs as a compiler step — no manual review.
  *
@@ -146,7 +146,34 @@ function error(gate: GateContext, rule: string, detail: string) {
   violations.push({ rule, path: gate.relativePath, detail, ruleNum });
 }
 
+// Non-blocking warnings — reported but don't fail the build.
+// Used for rules that are in phased rollout (existing code needs migration time).
+interface Warning {
+  rule: string;
+  path: string;
+  detail: string;
+  ruleNum: number;
+}
+const warnings: Warning[] = [];
+
+function warn(gate: GateContext, rule: string, detail: string) {
+  const m = rule.match(/^Rule (\d+)/);
+  const ruleNum = m ? parseInt(m[1], 10) : 99;
+  warnings.push({ rule, path: gate.relativePath, detail, ruleNum });
+}
+
 function flushViolations() {
+  // Flush warnings first (non-blocking, advisory only)
+  if (warnings.length > 0) {
+    warnings.sort((a, b) => a.ruleNum - b.ruleNum);
+    for (const w of warnings) {
+      process.stderr.write(
+        `⚠️  ${w.rule} in [${w.path}]:\n   ${w.detail}\n`,
+      );
+    }
+    warnings.length = 0;
+  }
+  // Flush blocking violations
   violations.sort((a, b) => a.ruleNum - b.ruleNum);
   for (const v of violations) {
     process.stderr.write(
@@ -517,6 +544,122 @@ const rule17_CircuitBreaker: RuleFn = (ctx) => {
   }
 };
 
+/**
+ * Constitutional source: II-a Timeout Standards — "Every external adapter call SHALL
+ *   respect per-service timeout bounds" (5–30s per adapter table)
+ * Domain: Resilience
+ * Lazy-agent shortcut: fetch(url) without AbortController/signal — "it responds in 50ms in dev"
+ * Enforcement: pattern-based
+ */
+const rule20_FetchTimeout: RuleFn = (ctx) => {
+  for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    const exprText = expr.getText();
+
+    // Match any fetch variant: direct fetch(), property-access .fetch(), Bun.fetch
+    const isFetch = exprText === "fetch"
+      || exprText.endsWith(".fetch")
+      || (Node.isPropertyAccessExpression(expr) && expr.getName() === "fetch");
+    if (!isFetch) continue;
+
+    const args = call.getArguments();
+    // fetch(url) with no second arg = no timeout signal
+    if (args.length < 2) {
+      error(ctx, "Rule 20 FetchTimeout",
+        `fetch() call has no options argument — must include { signal: AbortSignal.timeout(N) }.`);
+      continue;
+    }
+
+    // Second arg exists — check for signal in options object
+    const opts = args[1];
+    if (Node.isObjectLiteralExpression(opts)) {
+      const signalProp = opts.getProperty("signal");
+      if (!signalProp) {
+        error(ctx, "Rule 20 FetchTimeout",
+          `fetch() options missing "signal" — must include { signal: AbortSignal.timeout(N) } to enforce per-service timeout bounds.`);
+      }
+    }
+  }
+};
+
+/**
+ * Constitutional source: II-a (timeout defaults configurable via env vars) +
+ *   VI (startup validator blocks missing env) — derived: env access without fallback
+ *   means no startup-time validation
+ * Domain: Resilience
+ * Lazy-agent shortcut: process.env.DATABASE_URL without ?? fallback — "it's always set in .env"
+ * Enforcement: location-based (scope: exclude config/ and env-schema.ts)
+ */
+const rule21_EnvVarFallback: RuleFn = (ctx) => {
+  if (ctx.normalizedPath.includes("/config/")) return;
+  if (ctx.normalizedPath.endsWith("env-schema.ts")) return;
+
+  for (const pe of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
+    if (pe.getExpression().getText() !== "process.env") continue;
+    const varName = pe.getName();
+    const parent = pe.getParent();
+
+    // Allow: process.env.X ?? fallback or process.env.X || fallback
+    if (Node.isBinaryExpression(parent)) {
+      const op = parent.getOperatorToken().getText();
+      if (op === "??" || op === "||") continue;
+    }
+
+    // Allow: validated by Zod (envSchema.parse(process.env) or Schema.parse(process.env.X))
+    let isZodValidated = false;
+    let ancestor: Node | undefined = pe;
+    while (ancestor) {
+      if (Node.isCallExpression(ancestor)) {
+        const ce = ancestor.getExpression();
+        if (Node.isPropertyAccessExpression(ce)) {
+          if (["parse", "safeParse", "parseAsync"].includes(ce.getName())) {
+            isZodValidated = true;
+            break;
+          }
+        }
+      }
+      ancestor = ancestor.getParent();
+    }
+    if (isZodValidated) continue;
+
+    error(ctx, "Rule 21 EnvVarFallback",
+      `process.env.${varName} accessed without ?? fallback or Zod validation. ` +
+      `Missing env vars cause runtime crashes — provide a default or parse via env-schema.`);
+  }
+};
+
+/**
+ * Constitutional source: Development Standards naming conventions (*.config.ts) +
+ *   Free Tier Budget Awareness (URLs/endpoints/thresholds must be configurable)
+ * Domain: Resilience
+ * Lazy-agent shortcut: const SUPABASE_URL = "https://xyz.supabase.co" in an adapter —
+ *   "I'll move it to config later"
+ * Enforcement: location-based (scope: exclude config/ and *.config.ts)
+ */
+const rule22_NoHardcodedConfig: RuleFn = (ctx) => {
+  if (ctx.normalizedPath.includes("/config/")) return;
+  if (ctx.normalizedPath.endsWith(".config.ts")) return;
+
+  for (const sl of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.StringLiteral)) {
+    const val = sl.getLiteralValue();
+    if (typeof val !== "string") continue;
+
+    // Hardcoded URLs
+    if (/^https?:\/\/|^wss?:\/\//.test(val)) {
+      error(ctx, "Rule 22 NoHardcodedConfig",
+        `Hardcoded URL "${val.slice(0, 60)}" — move to config/ or a *.config.ts file.`);
+      continue;
+    }
+
+    // Hardcoded infrastructure addresses with common service ports
+    if (/:\d{4,5}/.test(val) &&
+        /:(5432|6379|7474|7687|5433|9092|5672|27017|9200|3306|5000|3000|8080|8280)\b/.test(val)) {
+      error(ctx, "Rule 22 NoHardcodedConfig",
+        `Hardcoded infrastructure address "${val.slice(0, 60)}" — move to config/ or a *.config.ts file.`);
+    }
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Domain C: Query Injection & Data Integrity
 // ═══════════════════════════════════════════════════════════════════════════
@@ -857,6 +1000,36 @@ const rule14_SpanCoverage: RuleFn = (ctx) => {
   }
 };
 
+/**
+ * Constitutional source: V — "All logs MUST be structured JSON with trace_id"
+ * Domain: Correctness / Observability
+ * Lazy-agent shortcut: console.log("pipeline done") instead of logger.info({...}) —
+ *   "I'll add structured logging later"
+ * Enforcement: location-based (scope: core/ and adapters/, exclude __tests__/)
+ */
+const rule23_StructuredLogs: RuleFn = (ctx) => {
+  if (!ctx.normalizedPath.includes("/core/") && !ctx.normalizedPath.includes("/adapters/")) return;
+  if (ctx.normalizedPath.includes("/__tests__/")) return;
+  // ponytail: logger.ts is the structured logger implementation itself;
+  // its console.log(JSON.stringify(entry)) is the legitimate output mechanism.
+  if (ctx.normalizedPath.endsWith("logger.ts")) return;
+
+  for (const call of ctx.sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    if (!Node.isPropertyAccessExpression(expr)) continue;
+    if (expr.getExpression().getText() !== "console") continue;
+
+    const method = expr.getName();
+    // Flag console.log, .info, .warn, .debug — not .error (handled by Rule 5 PII check)
+    // Allow console.time / console.timeEnd (legitimate profiling)
+    if (["log", "info", "warn", "debug"].includes(method)) {
+      error(ctx, "Rule 23 StructuredLogs",
+        `console.${method}() in core/adapters — use structured logger (logger.info/warn/error with trace_id). ` +
+        `All logs MUST be structured JSON per constitution V.`);
+    }
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Domain F: Type Safety
 // ═══════════════════════════════════════════════════════════════════════════
@@ -944,6 +1117,59 @@ const rule16_PortInjection: RuleFn = (ctx) => {
   }
 };
 
+/**
+ * Constitutional source: Development Standards / Vertical Feature Slice Structure —
+ *   "The core orchestrator SHALL NOT import from feature directories directly —
+ *    it depends only on core/ports.ts"
+ * Domain: Structural
+ * Lazy-agent shortcut: import { ContactTools } from "../../features/contacts/tools" —
+ *   faster than going through the port interface
+ * Enforcement: location-based (scope: core/, exclude __tests__/ and ports.ts)
+ */
+const rule25_NoFeatureImports: RuleFn = (ctx) => {
+  if (!ctx.normalizedPath.includes("/core/")) return;
+  if (ctx.normalizedPath.includes("/__tests__/")) return;
+  // ponytail: ports.ts defines interfaces that features reference; it doesn't import from features
+  if (ctx.normalizedPath.endsWith("ports.ts")) return;
+
+  for (const imp of ctx.sourceFile.getImportDeclarations()) {
+    const specifier = imp.getModuleSpecifierValue();
+    // Catch relative imports into features/ (../../features/ or ../features/)
+    // and absolute imports from features/
+    if (/features\//.test(specifier)) {
+      error(ctx, "Rule 25 NoFeatureImports",
+        `core/ file imports from "${specifier}" — core SHALL depend only on core/ports.ts, not feature directories.`);
+    }
+  }
+};
+
+/**
+ * Constitutional source: Development Standards / Naming Conventions —
+ *   "Adapter files: *.adapter.ts in adapters/<domain>/"
+ * Domain: Structural
+ * Lazy-agent shortcut: File named supabase-contacts.ts instead of
+ *   supabase-contacts.adapter.ts — "the folder is already named adapters, it's clear enough"
+ * Enforcement: location-based (scope: adapters/, allow barrels/types/tests/schemas)
+ */
+const rule24_AdapterNaming: RuleFn = (ctx) => {
+  if (!ctx.normalizedPath.includes("/adapters/")) return;
+
+  const fileName = ctx.normalizedPath.split("/").pop() || "";
+
+  // Allow standard exceptions
+  if (fileName.endsWith(".adapter.ts")) return;
+  if (fileName === "index.ts") return;
+  if (fileName === "types.ts" || fileName.endsWith(".types.ts")) return;
+  if (fileName.endsWith(".test.ts")) return;
+  if (fileName.endsWith(".schema.ts")) return;
+
+  // ponytail: non-blocking warning — existing adapters need migration time.
+  // Upgrade to error() once all adapter files are renamed.
+  warn(ctx, "Rule 24 AdapterNaming",
+    `Adapter file "${fileName}" must end in .adapter.ts per naming conventions. ` +
+    `Barrel files, types, tests, and schemas are exempt.`);
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Orchestrator
 // ═══════════════════════════════════════════════════════════════════════════
@@ -959,6 +1185,9 @@ const ALL_RULES: RuleFn[] = [
   rule5_DataErrorPII,
   rule6_GracefulShutdown,
   rule17_CircuitBreaker,
+  rule20_FetchTimeout,
+  rule21_EnvVarFallback,
+  rule22_NoHardcodedConfig,
   // Domain C: Query Injection & Data Integrity
   rule7_Neo4jParameterized,
   rule8_SupabaseRLS,
@@ -971,10 +1200,13 @@ const ALL_RULES: RuleFn[] = [
   // Domain E: Telemetry & Observability
   rule13_SpanPIIGuard,
   rule14_SpanCoverage,
+  rule23_StructuredLogs,
   // Domain F: Type Safety
   rule15_NoAny,
   // Domain G: Architecture Enforcement
   rule16_PortInjection,
+  rule25_NoFeatureImports,
+  rule24_AdapterNaming,
 ];
 
 async function executeSweep(targetPath?: string): Promise<boolean> {
@@ -1028,7 +1260,7 @@ async function executeSweep(targetPath?: string): Promise<boolean> {
   );
 
   if (passed) {
-    console.log("✅ All 19 firewall rules passed. Build allowed.\n");
+    console.log("✅ All 25 firewall rules passed. Build allowed.\n");
   } else {
     console.error(
       `\n🚨 BUILD BLOCKED: ${totalViolations.count} structural security violation(s) found across ${sourceFiles.length} file(s).\n`,

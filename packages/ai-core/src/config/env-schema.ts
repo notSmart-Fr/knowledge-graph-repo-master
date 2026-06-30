@@ -10,8 +10,10 @@ export const envSchema = z.object({
   NEO4J_USER: z.string().min(1),
   NEO4J_PASSWORD: z.string().min(1),
   // AI
-  GEMINI_API_KEY: z.string().startsWith("AIza"),
-  DEEPSEEK_API_KEY: z.string().startsWith("sk-"),
+  GEMINI_API_KEY: z.string().startsWith("AIza").optional(),
+  GEMINI_API_URL: z.string().url().default("https://generativelanguage.googleapis.com"),
+  DEEPSEEK_API_KEY: z.string().startsWith("sk-").optional(),
+  DEEPSEEK_API_URL: z.string().url().default("https://api.deepseek.com/chat/completions"),
   LOCAL_LLM_URL: z.string().url().default("http://localhost:11434").optional(),
   // Voice
   LIVEKIT_URL: z.string().url(),
@@ -33,6 +35,8 @@ export const envSchema = z.object({
   REDIS_URL: z.string().url(),
   // Encryption
   ENCRYPTION_MASTER_KEY: z.string().length(64), // 32-byte hex key
+  // DSAR
+  DSAR_ENABLED: z.coerce.boolean().default(false),
 });
 
 // Lazy env singleton — parse runs on first access, not at import time.

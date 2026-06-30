@@ -51,7 +51,7 @@ export function renderHealthCards(root: HTMLElement): void {
 
   const poll = async (): Promise<void> => {
     try {
-      const res = await fetch(READY_URL, { method: "GET" });
+      const res = await fetch(READY_URL, { method: "GET", signal: AbortSignal.timeout(5_000) });
       if (!res.ok) {
         store.patchState({ readyEndpointAvailable: false });
         render(card, breakersCard, store.getState().adapters, store.getState().circuitBreakers, true);

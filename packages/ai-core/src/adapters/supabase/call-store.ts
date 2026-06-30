@@ -1,13 +1,25 @@
+import crypto from "node:crypto";
 import type { ICallStore, Call } from "../../core/ports.js";
 import { CallSchema } from "../../core/ports.js";
 import { supabaseServiceClient } from "./client.js";
 import { DatabaseDomainError } from "../../core/errors.js";
+import { fieldEncryption } from "../encryption/field-encryption.js";
 
 export class SupabaseCallStore implements ICallStore {
   async create(call: Omit<Call, "id" | "createdAt">): Promise<Call> {
+    // We need to generate an ID first for encryption (since we need rowId)
+    const id = crypto.randomUUID();
+    const callWithId = { ...call, id };
+    const encryptedCall = fieldEncryption.encryptObject(
+      callWithId as Record<string, unknown>,
+      id,
+      ["transcriptJson"],
+      "call"
+    );
+
     const { data, error } = await supabaseServiceClient
       .from("calls")
-      .insert(this.camelToSnake(call))
+      .insert(this.camelToSnake(encryptedCall as Record<string, unknown>))
       .select("*")
       .single();
 
@@ -15,24 +27,54 @@ export class SupabaseCallStore implements ICallStore {
       throw new DatabaseDomainError("CALL_CREATE_FAILED", error.message, { code: error.code });
     }
 
-    return CallSchema.parse(this.snakeToCamel(data));
+    const camelData = this.snakeToCamel(data);
+    const decryptedData = fieldEncryption.decryptObject(
+      camelData as Record<string, unknown>,
+      data.id,
+      ["transcriptJson"],
+      "call"
+    );
+
+    return CallSchema.parse(decryptedData);
   }
 
   async appendTranscript(callId: string, chunk: Record<string, unknown>): Promise<void> {
+    // First get current (encrypted) transcript, decrypt it, append, then encrypt again
     const { data: currentCall } = await supabaseServiceClient
       .from("calls")
       .select("transcript_json")
       .eq("id", callId)
       .single();
 
+    let currentTranscript: Record<string, unknown> = {};
+    if (currentCall?.transcript_json) {
+      // Decrypt
+      const decrypted = fieldEncryption.decrypt(
+        currentCall.transcript_json as string,
+        callId,
+        "call"
+      );
+      try {
+        currentTranscript = JSON.parse(decrypted);
+      } catch {
+        currentTranscript = {};
+      }
+    }
+
     const updatedTranscript = {
-      ...(currentCall?.transcript_json || {}),
+      ...currentTranscript,
       ...chunk,
     };
 
+    const encryptedTranscript = fieldEncryption.encrypt(
+      JSON.stringify(updatedTranscript),
+      callId,
+      "call"
+    );
+
     const { error } = await supabaseServiceClient
       .from("calls")
-      .update({ transcript_json: updatedTranscript })
+      .update({ transcript_json: encryptedTranscript })
       .eq("id", callId);
 
     if (error) {
@@ -52,7 +94,15 @@ export class SupabaseCallStore implements ICallStore {
       throw new DatabaseDomainError("CALL_FINALIZE_FAILED", error.message, { code: error.code });
     }
 
-    return CallSchema.parse(this.snakeToCamel(data));
+    const camelData = this.snakeToCamel(data);
+    const decryptedData = fieldEncryption.decryptObject(
+      camelData as Record<string, unknown>,
+      data.id,
+      ["transcriptJson"],
+      "call"
+    );
+
+    return CallSchema.parse(decryptedData);
   }
 
   private snakeToCamel(obj: Record<string, unknown>): Record<string, unknown> {

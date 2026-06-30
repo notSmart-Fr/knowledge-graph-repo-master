@@ -19,12 +19,13 @@ export class DeepSeekFallbackProvider implements IAgentProvider {
     try {
       const prompt = this.buildPrompt(context);
       const data = DeepSeekChatCompletionSchema.parse(
-        await fetch("https://api.deepseek.com/chat/completions", {
+        await fetch(env.DEEPSEEK_API_URL, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
           },
+          signal: AbortSignal.timeout(10_000),
           body: JSON.stringify({
             model: "deepseek-chat",
             messages: [{ role: "user", content: prompt }],
