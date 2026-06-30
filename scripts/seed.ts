@@ -13,6 +13,8 @@
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { createLogger } from "../packages/ai-core/src/core/logger.js";
+import { fieldEncryption } from "../packages/ai-core/src/adapters/encryption/field-encryption.js";
+import crypto from "node:crypto";
 
 const logger = createLogger("seed");
 
@@ -187,11 +189,22 @@ async function seedContacts(client: SupabaseClient, accounts: Account[]): Promis
     const accountIndex = i % accounts.length;
     const roles: Contact["role"][] = ["lead", "contact", "decision_maker"];
     const role = roles[i % 3];
+    const id = crypto.randomUUID();
+    const phone = generatePhone(i);
+    const email = generateEmail(name);
+
+    const encryptedData = fieldEncryption.encryptObject(
+      { id, phone, email },
+      id,
+      ["phone", "email"],
+      "contact"
+    );
 
     const contactData = {
+      id,
       name,
-      phone: generatePhone(i),
-      email: generateEmail(name),
+      phone: encryptedData.phone,
+      email: encryptedData.email,
       account_id: accounts[accountIndex]?.id || null,
       role,
       tags: [accountIndex % 2 === 0 ? "vip" : "standard", role],
@@ -278,18 +291,28 @@ async function seedCalls(client: SupabaseClient, contacts: Contact[]): Promise<C
   for (let i = 0; i < 8; i++) {
     const contact = contacts[i % contacts.length];
     const direction: Call["direction"] = i % 2 === 0 ? "inbound" : "outbound";
+    const id = crypto.randomUUID();
+    const transcriptJson = {
+      segments: [
+        { speaker: "customer", text: "Hello, I have a question about my account." },
+        { speaker: "agent", text: "Of course, how can I help you today?" },
+        { speaker: "customer", text: "I wanted to check the status of my recent order." },
+      ],
+    };
+
+    const encryptedData = fieldEncryption.encryptObject(
+      { id, transcriptJson },
+      id,
+      ["transcriptJson"],
+      "call"
+    );
 
     const callData = {
+      id,
       contact_id: contact.id,
       agent_id: null,
       direction,
-      transcript_json: {
-        segments: [
-          { speaker: "customer", text: "Hello, I have a question about my account." },
-          { speaker: "agent", text: "Of course, how can I help you today?" },
-          { speaker: "customer", text: "I wanted to check the status of my recent order." },
-        ],
-      },
+      transcript_json: encryptedData.transcriptJson,
       summary: `Call with ${contact.name} regarding order status inquiry.`,
       sentiment: sentiments[i % 3],
       action_items: ["Follow up on order status", "Send confirmation email"],

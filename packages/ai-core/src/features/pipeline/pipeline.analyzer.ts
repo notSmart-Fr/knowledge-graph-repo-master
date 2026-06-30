@@ -1,14 +1,17 @@
 
-import { IGraphRetriever, IAgentProvider, CRMGraphContext } from "../../core/ports";
+import { IGraphRetriever } from "../../core/ports.js";
+import { createPipelineAnalyzer } from "../../agents/pipeline-analyzer.js";
+import { createLogger } from "../../core/logger.js";
+
+const logger = createLogger("pipeline-analyzer-feature");
 
 export async function analyzePipeline(
   graphRetriever: IGraphRetriever,
-  agentProvider: IAgentProvider,
-  staleDays: number = 14
+  staleDays: number = 30
 ) {
-  // TODO: Implement pipeline analysis using pipeline.analyzer agent
   const staleDeals = await graphRetriever.getStaleDeals(staleDays);
-  const emptyContext: CRMGraphContext = { deals: staleDeals, tickets: [], calls: [] };
-  const response = await agentProvider.generate(emptyContext);
-  return response;
+  const analyzer = createPipelineAnalyzer();
+  const report = await analyzer.analyzeStaleDeals(staleDeals);
+  logger.info("Pipeline analysis complete", { staleDays, dealCount: staleDeals.length });
+  return report;
 }

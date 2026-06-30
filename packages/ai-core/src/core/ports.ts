@@ -113,6 +113,8 @@ export interface IContactStore {
   getByPhone(phone: string): Promise<Contact | null>;
   getById(id: string): Promise<Contact | null>;
   search(query: string): Promise<Contact[]>;
+  create(contact: Omit<Contact, "id" | "createdAt">): Promise<Contact>;
+  update(id: string, fields: Partial<Contact>): Promise<Contact>;
 }
 
 export interface IDealStore {

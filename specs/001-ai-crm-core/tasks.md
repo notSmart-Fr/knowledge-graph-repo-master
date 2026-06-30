@@ -131,23 +131,23 @@
 
 ### Encryption
 
-- [ ] T035 [US5] Implement per-field encryption in `packages/ai-core/src/adapters/encryption/field-encryption.ts` (AES-256-GCM, HKDF per-row key from `ENCRYPTION_MASTER_KEY` + `salt=row_id` + `info="contact|call|session"`, lazy re-encrypt on key rotation when master key changes)
-- [ ] T036 [US5] Integrate encryption into Supabase adapter CRUD in `packages/ai-core/src/adapters/supabase/` (encrypt on write for phone/email/transcript_json/messages fields, decrypt on read in-memory only, never log decrypted values)
+- [x] T035 [US5] Implement per-field encryption in `packages/ai-core/src/adapters/encryption/field-encryption.ts` (AES-256-GCM, HKDF per-row key from `ENCRYPTION_MASTER_KEY` + `salt=row_id` + `info="contact|call|session"`, lazy re-encrypt on key rotation when master key changes)
+- [x] T036 [US5] Integrate encryption into Supabase adapter CRUD in `packages/ai-core/src/adapters/supabase/` (encrypt on write for phone/email/transcript_json/messages fields, decrypt on read in-memory only, never log decrypted values)
 
 ### Audit Logs
 
-- [ ] T037 [P] [US5] Implement audit log writer in `packages/ai-core/src/adapters/supabase/audit-log.ts` (INSERT-only on every CRM data access: actor_id, actor_role, action, entity_type, entity_id, timestamp, ip_address. Service_role for writes, no UPDATE/DELETE allowed via RLS)
-- [ ] T038 [US5] Wire audit logging into every adapter CRUD method (log on create/read/update/delete with correct entity_type and action, use requesting user's auth.uid() as actor)
+- [x] T037 [P] [US5] Implement audit log writer in `packages/ai-core/src/adapters/supabase/audit-log.ts` (INSERT-only on every CRM data access: actor_id, actor_role, action, entity_type, entity_id, timestamp, ip_address. Service_role for writes, no UPDATE/DELETE allowed via RLS)
+- [x] T038 [US5] Wire audit logging into every adapter CRUD method (log on create/read/update/delete with correct entity_type and action, use requesting user's auth.uid() as actor)
 
 ### DSAR Architecture
 
-- [ ] T039 [P] [US5] Gate DSAR endpoints behind `DSAR_ENABLED` env var in `packages/ai-core/src/config/env-schema.ts` (add `DSAR_ENABLED` as optional boolean to Zod env schema, default false)
-- [ ] T040 [US5] Implement DSAR export endpoint in `packages/ai-core/src/features/contacts/dsar.ts` (when `DSAR_ENABLED=true`: join contacts↔calls↔tickets↔audit_logs by contact_id, return complete dataset as JSON. When `DSAR_ENABLED=false`: return 501)
-- [ ] T040a [P] [US5] Implement `deleteByOwner(ownerId)` in every Supabase adapter (contacts, deals, calls, tickets, user_sessions, audit_logs — hard-deletes all records owned by a given contact, including encrypted fields, session history, transcripts. Called by DSAR endpoint when DSAR_ENABLED=true)
+- [x] T039 [P] [US5] Gate DSAR endpoints behind `DSAR_ENABLED` env var in `packages/ai-core/src/config/env-schema.ts` (add `DSAR_ENABLED` as optional boolean to Zod env schema, default false)
+- [x] T040 [US5] Implement DSAR export endpoint in `packages/ai-core/src/features/contacts/dsar.ts` (when `DSAR_ENABLED=true`: join contacts↔calls↔tickets↔audit_logs by contact_id, return complete dataset as JSON. When `DSAR_ENABLED=false`: return 501)
+- [x] T040a [P] [US5] Implement `deleteByOwner(ownerId)` in every Supabase adapter (contacts, deals, calls, tickets, user_sessions, audit_logs — hard-deletes all records owned by a given contact, including encrypted fields, session history, transcripts. Called by DSAR endpoint when DSAR_ENABLED=true)
 
 ### Verification (US5)
 
-- [ ] T041 [US5] Run `pnpm test` for encryption: encrypt→decrypt roundtrip, verify PII fields are ciphertext in DB, verify key rotation re-encrypts on read. Run audit log test: verify INSERT succeeds with actor fields, verify UPDATE/DELETE blocked by RLS. Verify audit_logs table has 90-day retention policy and no UPDATE/DELETE grants. Verify `GET /audit?entity=contact&id=X&from=90d` returns complete trail (SC-008)
+- [x] T041 [US5] Run `pnpm test` for encryption: encrypt→decrypt roundtrip, verify PII fields are ciphertext in DB, verify key rotation re-encrypts on read. Run audit log test: verify INSERT succeeds with actor fields, verify UPDATE/DELETE blocked by RLS. Verify audit_logs table has 90-day retention policy and no UPDATE/DELETE grants. Verify `GET /audit?entity=contact&id=X&from=90d` returns complete trail (SC-008)
 
 ---
 
@@ -159,20 +159,20 @@
 
 ### Quality Gates
 
-- [ ] T042 Run `pnpm check` full AST firewall re-sweep across all new files (25 rules, 0 violations required — scan `core/orchestrator.ts`, `agents/`, `config/`, `health/`, `scripts/`, `apps/web/`)
-- [ ] T043 [P] Build SLA gate validation script in `scripts/validate.ts` (checks: cache hit rate >=30%, idempotency hit rate <=5%, no breaker >60s, DLQ depth <50, AI failure rate <5%, health P95 <500ms — all rolling windows)
-- [ ] T043a [P] Instrument free tier budget counters per constitution telemetry budget table: Supabase storage bytes gauge, Neo4j node + relationship count gauge, LiveKit bandwidth bytes counter. Wire into `/ready` and `scripts/validate.ts` to alert at 80% threshold
-- [ ] T044 [P] Build RAG triad evaluation script in `scripts/eval-rag.ts` (DeepEval on 50-example golden dataset: faithfulness >=0.90, answer relevancy >=0.85, context precision >=0.85)
+- [x] T042 Run `pnpm check` full AST firewall re-sweep across all new files (25 rules, 0 violations required — scan `core/orchestrator.ts`, `agents/`, `config/`, `health/`, `scripts/`, `apps/web/`)
+- [x] T043 [P] Build SLA gate validation script in `scripts/validate.ts` (checks: cache hit rate >=30%, idempotency hit rate <=5%, no breaker >60s, DLQ depth <50, AI failure rate <5%, health P95 <500ms — all rolling windows)
+- [x] T043a [P] Instrument free tier budget counters per constitution telemetry budget table: Supabase storage bytes gauge, Neo4j node + relationship count gauge, LiveKit bandwidth bytes counter. Wire into `/ready` and `scripts/validate.ts` to alert at 80% threshold
+- [x] T044 [P] Build RAG triad evaluation script in `scripts/eval-rag.ts` (DeepEval on 50-example golden dataset: faithfulness >=0.90, answer relevancy >=0.85, context precision >=0.85)
 
 ### Documentation & Integration
 
-- [ ] T045 [P] Write runnable self-check demo in `scripts/demo.ts` (end-to-end WhatsApp → orchestrator → response, assert P95 latency <2s, assert degradation path works, assert encryption roundtrip — zero framework dependencies)
-- [ ] T046 [P] Implement pipeline analyzer agent in `packages/ai-core/src/agents/pipeline-analyzer.ts` (Mastra agent: scans all deals, identifies stale deals >30 days with no stage change, generates summary report)
-- [ ] T047 Wire pipeline analyzer into BullMQ scheduled job in `scripts/worker.ts` (daily at 00:00 UTC, report pushed to DLQ if generation fails)
+- [x] T045 [P] Write runnable self-check demo in `scripts/demo.ts` (end-to-end WhatsApp → orchestrator → response, assert P95 latency <2s, assert degradation path works, assert encryption roundtrip — zero framework dependencies)
+- [x] T046 [P] Implement pipeline analyzer agent in `packages/ai-core/src/agents/pipeline-analyzer.ts` (Mastra agent: scans all deals, identifies stale deals >30 days with no stage change, generates summary report)
+- [x] T047 Wire pipeline analyzer into BullMQ scheduled job in `scripts/worker.ts` (daily at 00:00 UTC, report pushed to DLQ if generation fails)
 
 ### Final Validation
 
-- [ ] T048 Run `pnpm validate` full pre-commit pipeline (pnpm check → pnpm exec vitest run → pnpm exec tsx scripts/eval-rag.ts → pnpm exec tsx scripts/validate.ts — all gates must pass, exit 1 on any failure)
+- [x] T048 Run `pnpm validate` full pre-commit pipeline (pnpm check → pnpm exec vitest run → pnpm exec tsx scripts/eval-rag.ts → pnpm exec tsx scripts/validate.ts — all gates must pass, exit 1 on any failure)
 
 ---
 

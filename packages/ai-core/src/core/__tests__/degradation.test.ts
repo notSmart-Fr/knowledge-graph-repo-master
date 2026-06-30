@@ -49,6 +49,8 @@ function buildConfig(overrides: MockOverrides = {}) {
       }) as Contact,
     getById: async () => null,
     search: async () => [],
+    create: async (c: unknown) => c as Contact,
+    update: async (id: string, fields: unknown) => ({ id, ...(fields as object) } as Contact),
   };
 
   const graphRetriever: IGraphRetriever = {

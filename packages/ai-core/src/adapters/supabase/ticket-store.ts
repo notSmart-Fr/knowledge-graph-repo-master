@@ -2,6 +2,7 @@ import type { ITicketStore, Ticket } from "../../core/ports.js";
 import { TicketSchema } from "../../core/ports.js";
 import { supabaseServiceClient } from "./client.js";
 import { DatabaseDomainError } from "../../core/errors.js";
+import { auditLogWriter } from "./audit-log.js";
 
 export class SupabaseTicketStore implements ITicketStore {
   async getByContact(contactId: string): Promise<Ticket[]> {
@@ -14,7 +15,15 @@ export class SupabaseTicketStore implements ITicketStore {
       throw new DatabaseDomainError("TICKET_LOOKUP_FAILED", error.message, { code: error.code });
     }
 
-    return data.map((item) => TicketSchema.parse(this.snakeToCamel(item)));
+    const tickets = data.map((item) => TicketSchema.parse(this.snakeToCamel(item)));
+    for (const ticket of tickets) {
+      await auditLogWriter.log({
+        action: "READ",
+        entityType: "ticket",
+        entityId: ticket.id,
+      });
+    }
+    return tickets;
   }
 
   async create(ticket: Omit<Ticket, "id" | "createdAt">): Promise<Ticket> {
@@ -28,7 +37,13 @@ export class SupabaseTicketStore implements ITicketStore {
       throw new DatabaseDomainError("TICKET_CREATE_FAILED", error.message, { code: error.code });
     }
 
-    return TicketSchema.parse(this.snakeToCamel(data));
+    const createdTicket = TicketSchema.parse(this.snakeToCamel(data));
+    await auditLogWriter.log({
+      action: "CREATE",
+      entityType: "ticket",
+      entityId: createdTicket.id,
+    });
+    return createdTicket;
   }
 
   private snakeToCamel(obj: Record<string, unknown>): Record<string, unknown> {

@@ -12,7 +12,7 @@
     "test": "pnpm --filter @dtc/ai-core exec vitest run",
     "test:watch": "pnpm --filter @dtc/ai-core exec vitest",
     "clean": "node -e \"['packages/ai-core/dist', 'tsconfig.tsbuildinfo', 'packages/ai-core/tsconfig.tsbuildinfo'].forEach(p => { try { require('fs').rmSync(p, { recursive: true, force: true }) } catch {} })\"",
-    "validate": "echo 'Validate pipeline — run after implementation is complete.'",
+    "validate": "pnpm check && pnpm test && npx tsx scripts/eval-rag.ts && npx tsx scripts/validate.ts",
     "dev:web": "pnpm --filter @dtc/web dev",
     "build:web": "pnpm --filter @dtc/web build",
     "preview:web": "pnpm --filter @dtc/web preview"

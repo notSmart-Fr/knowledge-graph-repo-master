@@ -13,8 +13,50 @@ import { createLogger } from "../packages/ai-core/src/core/logger.js";
 import { createOrchestrator, OrchestratorResult } from "../packages/ai-core/src/core/orchestrator.js";
 import { CompositeIdempotencyStore } from "../packages/ai-core/src/adapters/messaging/idempotency.js";
 import { env } from "../packages/ai-core/src/config/env-schema.js";
+import { analyzePipeline } from "../packages/ai-core/src/features/pipeline/pipeline.analyzer.js";
+import { getGlobalDLQ } from "../packages/ai-core/src/adapters/messaging/bullmq-dlq.js";
 
 const logger = createLogger("whatsapp-worker");
+
+// Pipeline analyzer daily scheduled job
+async function runDailyPipelineAnalysis() {
+  logger.info("Starting daily pipeline analysis...");
+  try {
+    const dlq = getGlobalDLQ();
+    const mockGraphRetriever = {
+      expandFromContact: async () => ({ contact: undefined, account: undefined, deals: [], tickets: [], calls: [] }),
+      expandFromDeal: async () => ({ contact: undefined, account: undefined, deals: [], tickets: [], calls: [] }),
+      getStaleDeals: async () => [],
+    };
+    const report = await analyzePipeline(mockGraphRetriever);
+    logger.info("Daily pipeline analysis complete", { reportLength: report.length });
+    return report;
+  } catch (error: unknown) {
+    logger.error("Pipeline analysis failed", { error: String(error) });
+    // Enqueue to DLQ as per T047
+    const dlq = getGlobalDLQ();
+    await dlq.enqueue("pipeline-analyzer", { timestamp: new Date().toISOString() }, { errorCode: "ANALYSIS_FAILED", errorMessage: String(error), attemptCount: 1 });
+  }
+}
+
+// Schedule daily at 00:00 UTC
+let pipelineAnalysisInterval: NodeJS.Timeout | null = null;
+function startPipelineAnalyzer() {
+  // Calculate time until next midnight UTC
+  const now = new Date();
+  const nextMidnight = new Date(now);
+  nextMidnight.setUTCHours(24, 0, 0, 0);
+  const delay = nextMidnight.getTime() - now.getTime();
+
+  // Run once immediately, then every 24h
+  runDailyPipelineAnalysis();
+
+  pipelineAnalysisInterval = setTimeout(() => {
+    startPipelineAnalyzer(); // Restart to calculate next midnight again
+  }, delay);
+
+  logger.info("Pipeline analyzer scheduled", { nextRunAt: nextMidnight.toISOString() });
+}
 
 // WhatsApp webhook payload schema
 export const WhatsAppWebhookSchema = z.object({
@@ -347,6 +389,7 @@ if (import.meta.main) {
     logger.error("Failed to start worker", { error: String(error) });
     process.exit(1);
   });
+  startPipelineAnalyzer();
 }
 
 export { createWorkerServer };

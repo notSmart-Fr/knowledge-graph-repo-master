@@ -33,6 +33,8 @@ function createStreamingMocks() {
     getByPhone: async () => { calls.getByPhone++; return null; },
     getById: async () => null,
     search: async () => [],
+    create: async (c: unknown) => c,
+    update: async (id: string, fields: unknown) => ({ id, ...(fields as object) }),
   } as unknown as IContactStore;
 
   const graphRetriever: IGraphRetriever = {

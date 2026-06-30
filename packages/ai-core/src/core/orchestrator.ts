@@ -285,7 +285,17 @@ export class Orchestrator {
     // Extract phone from userId (assuming phone-based userId)
     // In a real system, this might be more complex
     const phone = context.userId;
-    const contact = await this.config.contactStore.getByPhone(phone);
+    let contact = await this.config.contactStore.getByPhone(phone);
+    if (!contact) {
+      // Create a new contact if not found
+      contact = await this.config.contactStore.create({
+        name: "Unknown Contact",
+        phone,
+        email: `unknown+${phone.replace(/\D/g, "")}@example.com`,
+        role: "lead",
+        tags: ["new"],
+      });
+    }
     return contact;
   }
 

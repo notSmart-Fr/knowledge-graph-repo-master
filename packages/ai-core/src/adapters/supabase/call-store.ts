@@ -4,6 +4,7 @@ import { CallSchema } from "../../core/ports.js";
 import { supabaseServiceClient } from "./client.js";
 import { DatabaseDomainError } from "../../core/errors.js";
 import { fieldEncryption } from "../encryption/field-encryption.js";
+import { auditLogWriter } from "./audit-log.js";
 
 export class SupabaseCallStore implements ICallStore {
   async create(call: Omit<Call, "id" | "createdAt">): Promise<Call> {
@@ -35,6 +36,11 @@ export class SupabaseCallStore implements ICallStore {
       "call"
     );
 
+    await auditLogWriter.log({
+      action: "CREATE",
+      entityType: "call",
+      entityId: id,
+    });
     return CallSchema.parse(decryptedData);
   }
 
@@ -80,6 +86,12 @@ export class SupabaseCallStore implements ICallStore {
     if (error) {
       throw new DatabaseDomainError("TRANSCRIPT_APPEND_FAILED", error.message, { code: error.code });
     }
+
+    await auditLogWriter.log({
+      action: "UPDATE",
+      entityType: "call",
+      entityId: callId,
+    });
   }
 
   async finalize(callId: string, summary: string): Promise<Call> {
@@ -102,6 +114,11 @@ export class SupabaseCallStore implements ICallStore {
       "call"
     );
 
+    await auditLogWriter.log({
+      action: "UPDATE",
+      entityType: "call",
+      entityId: callId,
+    });
     return CallSchema.parse(decryptedData);
   }
 

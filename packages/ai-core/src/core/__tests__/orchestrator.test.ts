@@ -78,6 +78,8 @@ function createMockContactStore(calls: MockCalls, contact?: Contact | null) {
     },
     getById: async () => contact || null,
     search: async () => [],
+    create: async (c: unknown) => c as Contact,
+    update: async (id: string, fields: unknown) => ({ id, ...(fields as object) } as Contact),
   } as unknown as IContactStore;
 }
 

@@ -2,6 +2,7 @@ import type { IDealStore, Deal } from "../../core/ports.js";
 import { DealSchema } from "../../core/ports.js";
 import { supabaseServiceClient } from "./client.js";
 import { DatabaseDomainError } from "../../core/errors.js";
+import { auditLogWriter } from "./audit-log.js";
 
 export class SupabaseDealStore implements IDealStore {
   async getByContact(contactId: string): Promise<Deal[]> {
@@ -14,7 +15,15 @@ export class SupabaseDealStore implements IDealStore {
       throw new DatabaseDomainError("DEAL_LOOKUP_FAILED", error.message, { code: error.code });
     }
 
-    return data.map((item) => DealSchema.parse(this.snakeToCamel(item)));
+    const deals = data.map((item) => DealSchema.parse(this.snakeToCamel(item)));
+    for (const deal of deals) {
+      await auditLogWriter.log({
+        action: "READ",
+        entityType: "deal",
+        entityId: deal.id,
+      });
+    }
+    return deals;
   }
 
   async getById(id: string): Promise<Deal | null> {
@@ -31,6 +40,11 @@ export class SupabaseDealStore implements IDealStore {
       throw new DatabaseDomainError("DEAL_LOOKUP_FAILED", error.message, { code: error.code });
     }
 
+    await auditLogWriter.log({
+      action: "READ",
+      entityType: "deal",
+      entityId: id,
+    });
     return DealSchema.parse(this.snakeToCamel(data));
   }
 
@@ -46,6 +60,11 @@ export class SupabaseDealStore implements IDealStore {
       throw new DatabaseDomainError("DEAL_UPDATE_FAILED", error.message, { code: error.code });
     }
 
+    await auditLogWriter.log({
+      action: "UPDATE",
+      entityType: "deal",
+      entityId: dealId,
+    });
     return DealSchema.parse(this.snakeToCamel(data));
   }
 

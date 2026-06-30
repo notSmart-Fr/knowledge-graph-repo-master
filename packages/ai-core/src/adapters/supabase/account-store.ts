@@ -2,6 +2,7 @@ import type { IAccountStore, Account } from "../../core/ports.js";
 import { AccountSchema } from "../../core/ports.js";
 import { supabaseServiceClient } from "./client.js";
 import { DatabaseDomainError } from "../../core/errors.js";
+import { auditLogWriter } from "./audit-log.js";
 
 export class SupabaseAccountStore implements IAccountStore {
   async getById(id: string): Promise<Account | null> {
@@ -18,6 +19,11 @@ export class SupabaseAccountStore implements IAccountStore {
       throw new DatabaseDomainError("ACCOUNT_LOOKUP_FAILED", error.message, { code: error.code });
     }
 
+    await auditLogWriter.log({
+      action: "READ",
+      entityType: "account",
+      entityId: id,
+    });
     return AccountSchema.parse(this.snakeToCamel(data));
   }
 
@@ -35,6 +41,11 @@ export class SupabaseAccountStore implements IAccountStore {
       throw new DatabaseDomainError("ACCOUNT_HEALTH_LOOKUP_FAILED", error.message, { code: error.code });
     }
 
+    await auditLogWriter.log({
+      action: "READ",
+      entityType: "account",
+      entityId: id,
+    });
     return data.health_score ?? null;
   }
 
