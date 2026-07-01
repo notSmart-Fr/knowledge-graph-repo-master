@@ -219,4 +219,5 @@ export interface ILiveKitRoomManager {
   closeRoom(roomName: string): Promise<void>;
   verifyWebhook(body: string, authHeader: string): Promise<LiveKitWebhookEvent>;
   healthCheck(): Promise<boolean>;
+  listRooms(): Promise<string[]>;
 }

@@ -79,11 +79,88 @@ export const widgetStyles = `
   background: var(--crm-assistant-bg);
 }
 .crm-widget-footer {
-  display: flex;
-  gap: 8px;
   padding: 12px;
   border-top: 1px solid var(--crm-border);
+}
+.crm-widget-input-row {
+  display: flex;
+  gap: 8px;
   align-items: flex-end;
+}
+.crm-widget-input-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.crm-widget-voice-toggle {
+  background: var(--crm-assistant-bg);
+  border: 1px solid var(--crm-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.crm-widget-voice-toggle.active {
+  background: var(--crm-primary);
+  border-color: var(--crm-primary);
+}
+.crm-widget-voice-toggle.unavailable {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.crm-widget-voice-toggle.connecting {
+  opacity: 0.7;
+  animation: crm-spin 1s linear infinite;
+}
+.crm-widget-mic-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.crm-widget-mic {
+  background: var(--crm-assistant-bg);
+  border: 1px solid var(--crm-border);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  position: relative;
+  z-index: 1;
+}
+.crm-widget-mic.recording {
+  background: #fee2e2;
+  border-color: #ef4444;
+}
+.crm-widget-mic.unavailable {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.crm-widget-mic-ring {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  pointer-events: none;
+}
+.crm-widget-mic-ring.active {
+  border-color: #ef4444;
+  animation: crm-pulse 1.2s ease-out infinite;
+}
+.crm-widget-mic-timer {
+  position: absolute;
+  top: -18px;
+  font-size: 11px;
+  color: #ef4444;
+  white-space: nowrap;
+}
+@keyframes crm-pulse {
+  0% { transform: scale(0.9); opacity: 1; }
+  100% { transform: scale(1.3); opacity: 0; }
 }
 .crm-widget-input {
   flex: 1;

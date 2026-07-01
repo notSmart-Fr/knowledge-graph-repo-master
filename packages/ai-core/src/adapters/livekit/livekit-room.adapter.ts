@@ -150,4 +150,21 @@ export class LiveKitRoomAdapter implements ILiveKitRoomManager {
       }
     });
   }
+
+  async listRooms(): Promise<string[]> {
+    return tracer.startActiveSpan("livekit.listRooms", async (span) => {
+      try {
+        const rooms = await this.roomClient.listRooms();
+        const names = rooms.map((r) => r.name).filter((n): n is string => Boolean(n));
+        span.setAttribute("room_count", names.length);
+        return names;
+      } catch (error: unknown) {
+        span.recordException(error instanceof Error ? error : new Error(String(error)));
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw new IntegrationError("LIVEKIT_LIST_ROOMS_FAILED", "Failed to list LiveKit rooms");
+      } finally {
+        span.end();
+      }
+    });
+  }
 }

@@ -64,7 +64,7 @@ export const envSchema = z.object({
   LIVEKIT_URL: z.string().url(),
   LIVEKIT_API_KEY: z.string().min(1),
   LIVEKIT_SECRET: z.string().min(1),
-  DEEPGRAM_API_KEY: z.string().min(1),
+  CARTESIA_API_KEY: z.string().startsWith("sk-"),
   // WhatsApp
   WHATSAPP_API_TOKEN: z.string().min(1),
   WHATSAPP_PHONE_ID: z.string().min(1),

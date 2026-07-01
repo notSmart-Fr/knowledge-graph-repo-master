@@ -1,13 +1,14 @@
-// scripts/load-env.ts
-// Loads .env from repo root for any script that needs env vars.
-import { join } from "node:path";
+// Loads .env from repo root for scripts (Node-compatible).
+import { existsSync, readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-function applyEnvFile(filePath: string) {
-  const file = Bun.file(filePath);
-  
-  if (!file.exists()) return;
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
-  const text = file.text();
+function applyEnvFile(filePath: string): void {
+  if (!existsSync(filePath)) return;
+
+  const text = readFileSync(filePath, "utf8");
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
@@ -29,8 +30,9 @@ function applyEnvFile(filePath: string) {
   }
 }
 
-/** Loads root .env only (no legacy app .env files). */
-export function loadMonorepoEnv() {
-  const root = join(import.meta.dir, "..");
+/** Loads root `.env` and `.env.local` (later files do not override already-set vars). */
+export function loadMonorepoEnv(): void {
+  const root = join(__dirname, "..");
   applyEnvFile(join(root, ".env"));
+  applyEnvFile(join(root, ".env.local"));
 }

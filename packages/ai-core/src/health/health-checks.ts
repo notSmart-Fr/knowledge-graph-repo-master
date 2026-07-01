@@ -27,6 +27,7 @@ interface RegisteredHealthCheck {
   name: string;
   check: HealthCheckFn;
   required: boolean;
+  timeoutMs?: number;
 }
 
 const healthChecks: RegisteredHealthCheck[] = [];
@@ -34,9 +35,10 @@ const healthChecks: RegisteredHealthCheck[] = [];
 export function registerHealthCheck(
   name: string,
   check: HealthCheckFn,
-  required = true
+  required = true,
+  timeoutMs = 5000
 ): void {
-  healthChecks.push({ name, check, required });
+  healthChecks.push({ name, check, required, timeoutMs });
   logger.info(`Registered health check: ${name} (required: ${required})`);
 }
 
@@ -62,7 +64,7 @@ export async function runHealthChecks(): Promise<SystemHealth> {
       const result = await Promise.race([
         healthCheck.check(),
         new Promise<{ healthy: boolean; latencyMs: number; error?: string }>((_, reject) =>
-          setTimeout(() => reject(new Error("Health check timeout")), 5000)
+          setTimeout(() => reject(new Error("Health check timeout")), healthCheck.timeoutMs ?? 5000)
         ),
       ]);
 
@@ -156,12 +158,52 @@ export function registerLiveKitHealthCheck(healthCheck: () => Promise<boolean>):
     async () => {
       const start = Date.now();
       try {
-        const healthy = await healthCheck();
+        const healthy = await Promise.race([
+          healthCheck(),
+          new Promise<boolean>((_, reject) =>
+            setTimeout(() => reject(new Error("LiveKit health check timeout")), 3000)
+          ),
+        ]);
         return { healthy, latencyMs: Date.now() - start };
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         return { healthy: false, latencyMs: Date.now() - start, error: message };
       }
+    },
+    false,
+    3000
+  );
+}
+
+/** Register Cartesia STT availability for /ready (API key present). */
+export function registerCartesiaHealthCheck(isConfigured: () => boolean): void {
+  registerHealthCheck(
+    "cartesia",
+    async () => {
+      const start = Date.now();
+      const healthy = isConfigured();
+      return {
+        healthy,
+        latencyMs: Date.now() - start,
+        error: healthy ? undefined : "CARTESIA_API_KEY not configured",
+      };
+    },
+    false
+  );
+}
+
+/** Register ffmpeg availability for voice-clip / WhatsApp audio paths. */
+export function registerFfmpegHealthCheck(isAvailable: () => boolean): void {
+  registerHealthCheck(
+    "ffmpeg",
+    async () => {
+      const start = Date.now();
+      const healthy = isAvailable();
+      return {
+        healthy,
+        latencyMs: Date.now() - start,
+        error: healthy ? undefined : "ffmpeg not found on PATH",
+      };
     },
     false
   );

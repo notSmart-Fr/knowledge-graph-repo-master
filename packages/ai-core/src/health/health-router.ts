@@ -39,6 +39,7 @@ function transformHealthToReady(health: SystemHealth): {
   status: "healthy" | "degraded";
   failures: string[];
   timestamp: string;
+  adapters: Array<{ name: string; status: "healthy" | "degraded" | "down" }>;
   dlqDepth: Record<string, number>;
   dlqTotal: number;
   circuitBreakers: Record<string, { state: string; failures: number }>;
@@ -58,6 +59,10 @@ function transformHealthToReady(health: SystemHealth): {
     status: health.overall === "down" ? "degraded" : health.overall,
     failures: health.failures,
     timestamp: health.timestamp,
+    adapters: health.adapters.map((adapter) => ({
+      name: adapter.name,
+      status: adapter.status,
+    })),
     dlqDepth: dlqSnapshot,
     dlqTotal,
     circuitBreakers: breakers,

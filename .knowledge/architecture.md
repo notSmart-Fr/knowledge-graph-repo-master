@@ -8,6 +8,7 @@ The system is organized into 7 logical layers. Data flows inward from external t
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║                         LAYER 7 — CLIENTS / USERS                       ║
 ║  WhatsApp user │ Voice caller │ Web browser (operator dashboard)        ║
+║  Widget customer (embed) │ apps/widget/ shadow DOM                     ║
 ╚══════════════════════════════════════╤═══════════════════════════════════╝
                                        │
                                        ▼
@@ -15,6 +16,7 @@ The system is organized into 7 logical layers. Data flows inward from external t
 ║                      LAYER 6 — TRANSPORT / INGRESS                      ║
 ║  Meta webhook (HTTPS) │ LiveKit room (WebRTC) │ Vite dev server (:5173) ║
 ║  worker.ts            │ voice-agent.ts        │ apps/web/               ║
+║  widget-server.ts (:8290) │ apps/widget/ IIFE bundle                    ║
 ╚══════════════════════════════════════╤═══════════════════════════════════╝
                                        │
                                        ▼
@@ -26,7 +28,7 @@ The system is organized into 7 logical layers. Data flows inward from external t
 ║  │   hydrate → cache → contact → graph → agent → sanitize → store     │ ║
 ║  │   Every step: circuit breaker + tracer.startActiveSpan()            │ ║
 ║  └────────────────────────────────────────────────────────────────────┘ ║
-║  Depends on: ports.ts (11 interfaces — NEVER concrete adapters)         ║
+║  Depends on: ports.ts (12 interfaces — NEVER concrete adapters)         ║
 ╚══════════════════════════════════╤═══════════════════════════════════════╝
                                    │
           ┌────────────────────────┼────────────────────────┐
@@ -175,6 +177,56 @@ LOOP:   ├── Chunk transcribed → text
 
 ---
 
+## Data Flow: Chat Widget (spec 002)
+
+Three input modes share one orchestrator pipeline; degradation is live voice → voice clip → text.
+
+```
+Customer site embeds <script src="widget.js">
+        │
+        ▼
+apps/widget/ (shadow DOM, ≤100 KB gzip base bundle)
+        │
+        ├── Text: POST /widget/chat → SSE tokens
+        │         scripts/widget-server.ts → processIntentStream(channel:"widget")
+        │
+        ├── Clip: MediaRecorder → POST /widget/audio (multipart)
+        │         transcodeToRaw (ffmpeg) → CartesiaClipTranscriber → SSE
+        │         ffmpeg down → 503 → mic disabled, text still works
+        │
+        └── Live: POST /widget/room → LiveKit token
+                  livekit-client (CDN on demand) → WebRTC
+                  voice-agent.ts (crm-voice-agent) joins via AgentDispatch
+                  LiveKit down → 503 → banner + clip fallback
+        │
+        ▼
+GET :8280/ready on init → voiceAvailable / sttAvailable flags
+JWT expired → store.blocked, banner, all modes no-op
+```
+
+**CORS**: `widget-server.ts` — `Access-Control-Allow-Origin: *` default; `WIDGET_ALLOWED_ORIGINS` comma-list enforces Origin check (403).
+
+---
+
+## Data Flow: WhatsApp Audio (spec 002)
+
+```
+WhatsApp audio message webhook
+        │
+        ▼
+worker.ts → downloadWhatsAppAudio → transcodeToRaw → CartesiaClipTranscriber
+        │
+        ▼
+orchestrator.processIntent(channel:"whatsapp", message:transcript)
+        │
+        ▼
+Cartesia TTS (≤1000 words) → Meta media upload → audio reply
+        │
+        └── FAIL → DLQ whatsapp_audio_fallback + text fallback message
+```
+
+---
+
 ## Data Flow: Web Dashboard (Read-Only)
 
 ```
@@ -216,7 +268,12 @@ Operator opens apps/web/ in browser
 │  (voice)    ├─────────►│  OrchestratorService  │◄─────────┤  (dashboard)│
 │             │          │  (core/orchestrator)  │  :8280   │  apps/web/  │
 └─────────────┘          └─────┬─────┬─────┬─────┘          └─────────────┘
-                               │     │     │
+                               │     │     │          ┌───────────────────┐
+                               │     │     │          │  Customer sites   │
+                               │     │     └─────────►│  apps/widget/     │
+                               │     │                │  widget-server    │
+                               │     │                │  :8290            │
+                               │     │                └───────────────────┘
                     ┌──────────┘     │     └──────────┐
                     ▼                ▼                 ▼
           ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐
@@ -245,7 +302,14 @@ Operator opens apps/web/ in browser
 
 ## Port Interface Map
 
-All 11 interfaces defined in `core/ports.ts`. Orchestrator depends ONLY on these.
+All 12 interfaces defined in `core/ports.ts`. Orchestrator depends ONLY on the store/AI/messaging ports.
+
+Widget transport uses additional adapters outside the orchestrator constructor:
+
+```
+ILiveKitRoomManager  → LiveKitRoomAdapter     (room create, dispatch, webhook)
+CartesiaClipTranscriber → clip-transcriber.ts (widget clip + WhatsApp audio STT)
+```
 
 ```
 OrchestratorService(ports: {
@@ -290,6 +354,9 @@ Adapter call
             All AI dead        → cached response + { degraded: true }
             Redis down        → SupabaseIdempotencyStore (idempotency_keys table)
             Both idemp. down  → at-least-once (process anyway, availability > consistency)
+            Widget live voice → clip mode (503 on /widget/room)
+            Widget clip STT   → text mode (503 on /widget/audio, ffmpeg/Cartesia down)
+            Text mode         → never fails (always available)
 ```
 
 ---
@@ -301,7 +368,9 @@ Adapter call
 │                      TRUST BOUNDARY                           │
 │                                                              │
 │  WhatsApp webhook   ─── Zod parse ───►  Internal State       │
-│  Voice audio        ─── STT text ───►   (validated, typed)   │
+│  Widget HTTP/SSE    ─── Zod parse ───►  (validated, typed)   │
+│  Widget multipart   ─── busboy + MIME ─►                       │
+│  Voice audio        ─── STT text ───►                        │
 │  Supabase Realtime  ─── Zod parse ───►                       │
 │  LiveKit transcript ─── Zod parse ───►                       │
 │                                                              │
@@ -386,7 +455,7 @@ Adapter call
 
 ---
 
-## AST Firewall: 19 Rules x 7 Domains
+## AST Firewall: 28 Rules x 7 Domains
 
 ```
 Domain A: Zod Boundary Safety       Domain E: Telemetry
@@ -412,3 +481,9 @@ Domain D: AI Pipeline
   R11 Mastra Tool Contract
   R12 Agent Step Ceiling
 ```
+
+---
+
+## Local development
+
+See **[run-and-verify.md](./run-and-verify.md)** for step-by-step startup (ports 8280/8290/3000/5173), tiered verification, and troubleshooting.

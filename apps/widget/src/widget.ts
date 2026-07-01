@@ -2,6 +2,8 @@ import { widgetStyles } from "./ui/styles.js";
 import { createChatView } from "./ui/chat.js";
 import { createTextInput } from "./ui/input.js";
 import { sendText } from "./modes/text.js";
+import { startVoice, stopVoice } from "./modes/voice.js";
+import { startRecording, stopAndUpload, setClipCallbacks } from "./modes/clip.js";
 import { store } from "./store.js";
 
 export interface WidgetInitConfig {
@@ -29,7 +31,7 @@ export async function probeHealth(healthUrl: string): Promise<{ voiceAvailable: 
     const cartesia = adapters.find((a) => a.name === "cartesia");
     return {
       voiceAvailable: livekit?.status === "healthy",
-      sttAvailable: cartesia?.status === "healthy" || cartesia?.status === "degraded",
+      sttAvailable: cartesia?.status === "healthy",
     };
   } catch {
     return { voiceAvailable: false, sttAvailable: false };
@@ -39,8 +41,6 @@ export async function probeHealth(healthUrl: string): Promise<{ voiceAvailable: 
 export function mountWidget(shadow: ShadowRoot, onClose: () => void): void {
   const shell = document.createElement("div");
   shell.className = "crm-widget-shell";
-  shell.setAttribute("role", "dialog");
-  shell.setAttribute("aria-label", "Chat widget");
 
   const banner = document.createElement("div");
   banner.className = "crm-widget-banner";
@@ -52,6 +52,7 @@ export function mountWidget(shadow: ShadowRoot, onClose: () => void): void {
   const closeBtn = document.createElement("button");
   closeBtn.className = "crm-widget-close";
   closeBtn.setAttribute("aria-label", "Close chat");
+  closeBtn.tabIndex = 5;
   closeBtn.textContent = "×";
   closeBtn.addEventListener("click", onClose);
   header.appendChild(closeBtn);
@@ -70,6 +71,43 @@ export function mountWidget(shadow: ShadowRoot, onClose: () => void): void {
   const chat = createChatView(body);
   const input = createTextInput(footer);
 
+  const syncVoiceButton = (): void => {
+    const { voiceAvailable, voiceConnecting, activeRoomName } = store.getState();
+    if (!voiceAvailable) {
+      input.setVoiceState("unavailable");
+      return;
+    }
+    if (voiceConnecting) {
+      input.setVoiceState("connecting");
+      return;
+    }
+    if (activeRoomName) {
+      input.setVoiceState("active");
+      return;
+    }
+    input.setVoiceState("idle");
+  };
+
+  const syncMicButton = (): void => {
+    const { sttAvailable } = store.getState();
+    input.setMicState(sttAvailable ? "idle" : "unavailable");
+  };
+
+  syncVoiceButton();
+  syncMicButton();
+  store.subscribe("stateChange", () => {
+    syncVoiceButton();
+    syncMicButton();
+  });
+  store.subscribe("roomFinished", () => syncVoiceButton());
+  store.subscribe("voiceUnavailable", () => syncVoiceButton());
+  store.subscribe("sttUnavailable", () => syncMicButton());
+
+  setClipCallbacks({
+    onRecordingChange: (recording) => input.setMicState(recording ? "recording" : store.getState().sttAvailable ? "idle" : "unavailable"),
+    onCountdown: (seconds) => input.setMicCountdown(seconds),
+  });
+
   store.subscribe("token", (e) => {
     const content = (e as CustomEvent<{ content: string }>).detail.content;
     chat.appendToken(content);
@@ -78,6 +116,14 @@ export function mountWidget(shadow: ShadowRoot, onClose: () => void): void {
   store.subscribe("done", () => {
     chat.setLoading(false);
     input.setDisabled(false);
+  });
+
+  store.subscribe("transcript", (e) => {
+    const content = (e as CustomEvent<{ content: string }>).detail.content;
+    chat.appendTurn("customer", content, "clip");
+    chat.appendTurn("assistant", "", "clip");
+    chat.setLoading(true);
+    input.setDisabled(true);
   });
 
   store.subscribe("stateChange", (e) => {
@@ -104,6 +150,38 @@ export function mountWidget(shadow: ShadowRoot, onClose: () => void): void {
       input.setDisabled(false);
       store.patch({ loading: false });
     }
+  });
+
+  input.onVoiceToggle(async () => {
+    const { sessionId, token, serverUrl, activeRoomName, blocked, voiceAvailable } = store.getState();
+    if (!sessionId || !token || blocked || !voiceAvailable) return;
+
+    if (activeRoomName) {
+      await stopVoice(activeRoomName, token, serverUrl);
+      syncVoiceButton();
+      return;
+    }
+
+    await startVoice(sessionId, token, serverUrl);
+    syncVoiceButton();
+  });
+
+  input.onMicPressStart(() => {
+    const { blocked, sttAvailable } = store.getState();
+    if (blocked || !sttAvailable) return;
+    void startRecording().catch(() => store.sttUnavailable());
+  });
+
+  input.onMicPressEnd(() => {
+    const { sessionId, token, serverUrl, blocked } = store.getState();
+    if (!sessionId || !token || blocked) return;
+    void stopAndUpload(sessionId, token, serverUrl).then((result) => {
+      if (!result.ok && store.getState().loading) {
+        chat.setLoading(false);
+        input.setDisabled(false);
+        store.patch({ loading: false });
+      }
+    });
   });
 
   shadow.addEventListener("keydown", (e) => {
@@ -133,6 +211,8 @@ export async function initWidget(config: WidgetInitConfig): Promise<void> {
     banner: null,
     voiceAvailable: health.voiceAvailable,
     sttAvailable: health.sttAvailable,
+    activeRoomName: null,
+    voiceConnecting: false,
   });
 }
 
@@ -147,6 +227,10 @@ export function closeWidget(shadow: ShadowRoot): void {
 }
 
 export function destroyWidget(shadow: ShadowRoot): void {
+  const { activeRoomName, token, serverUrl } = store.getState();
+  if (activeRoomName && token) {
+    void stopVoice(activeRoomName, token, serverUrl);
+  }
   closeWidget(shadow);
   store.reset();
   shadow.innerHTML = "";

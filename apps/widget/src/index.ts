@@ -27,6 +27,8 @@ export interface CrmWidgetApi {
 
 class CrmWidgetElement extends HTMLElement {
   connectedCallback(): void {
+    this.setAttribute("role", "dialog");
+    this.setAttribute("aria-label", "Chat widget");
     if (this.shadowRoot) return;
     const shadow = this.attachShadow({ mode: "open" });
     const style = document.createElement("style");

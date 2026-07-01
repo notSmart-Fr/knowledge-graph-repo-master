@@ -6,12 +6,18 @@
  * - T017: Cartesia Sonic STT (streaming WebSocket)
  * - T018: Cartesia Sonic TTS (streaming WebSocket)
  *
- * Usage: bun run scripts/voice-agent.ts
+ * Usage: npx tsx scripts/voice-agent.ts
  */
+
+import { loadMonorepoEnv } from "./load-env.js";
+loadMonorepoEnv();
 
 import { createLogger } from "../packages/ai-core/src/core/logger.js";
 import { CallSummarizerAgent, TranscriptSegment } from "../packages/ai-core/src/agents/call-summarizer.js";
 import { z } from "zod";
+import { cli, defineAgent, type JobContext, ServerOptions } from "@livekit/agents";
+import { RoomEvent, Track } from "@livekit/rtc-node";
+import { fileURLToPath } from "node:url";
 
 const logger = createLogger("voice-agent");
 
@@ -458,10 +464,52 @@ async function shutdown(signal: string): Promise<void> {
   logger.info(`Received ${signal}, shutting down gracefully...`);
   process.exit(0);
 }
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
 
-// Run voice agent
-if (import.meta.main) {
-  logger.info("Voice agent ready (use VoiceAgent class to integrate with LiveKit)");
+const JobMetadataSchema = z.object({
+  contactId: z.string(),
+  sessionId: z.string(),
+});
+
+export default defineAgent({
+  entry: async (ctx: JobContext) => {
+    const meta = JobMetadataSchema.parse(JSON.parse(ctx.job.metadata || "{}"));
+    await ctx.connect();
+
+    const voiceAgent = new VoiceAgent(
+      `widget-${meta.sessionId}`,
+      meta.contactId,
+      ctx.room.name ?? "widget-room"
+    );
+
+    ctx.room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
+      if (track.kind !== Track.Kind.Audio) return;
+      if (participant.identity === ctx.agent?.identity) return;
+      if (voiceAgent.getLifecycle().getTTSState() === "speaking") {
+        void voiceAgent.interrupt();
+      }
+    });
+
+    await voiceAgent.start();
+    ctx.addShutdownCallback(async () => {
+      await voiceAgent.end();
+    });
+  },
+});
+
+const isVoiceAgentMain =
+  import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}` ||
+  process.argv[1]?.endsWith("voice-agent.ts");
+
+if (isVoiceAgentMain) {
+  cli.runApp(
+    new ServerOptions({
+      agent: fileURLToPath(import.meta.url),
+      agentName: "crm-voice-agent",
+      wsURL: process.env.LIVEKIT_URL ?? "",
+      apiKey: process.env.LIVEKIT_API_KEY ?? "",
+      apiSecret: process.env.LIVEKIT_SECRET ?? process.env.LIVEKIT_API_SECRET ?? "",
+    })
+  );
 }

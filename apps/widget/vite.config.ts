@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 
-// IIFE embeddable widget — single-file bundle, no chunk splitting.
+// IIFE embeddable widget — single-file bundle; livekit-client loaded on demand via CDN.
 export default defineConfig({
   build: {
     lib: {
@@ -10,8 +10,12 @@ export default defineConfig({
       fileName: () => "widget.js",
     },
     rollupOptions: {
+      external: ["livekit-client"],
       output: {
         inlineDynamicImports: true,
+        globals: {
+          "livekit-client": "LivekitClient",
+        },
       },
     },
     target: "es2022",

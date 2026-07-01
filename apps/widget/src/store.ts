@@ -17,6 +17,8 @@ export interface WidgetState {
   loading: boolean;
   blocked: boolean;
   banner: string | null;
+  activeRoomName: string | null;
+  voiceConnecting: boolean;
 }
 
 const INITIAL_STATE: WidgetState = {
@@ -30,6 +32,8 @@ const INITIAL_STATE: WidgetState = {
   loading: false,
   blocked: false,
   banner: null,
+  activeRoomName: null,
+  voiceConnecting: false,
 };
 
 class WidgetStore extends EventTarget {
@@ -75,6 +79,45 @@ class WidgetStore extends EventTarget {
   degraded(_mode: string): void {
     this.patch({ loading: false });
     this.dispatchEvent(new CustomEvent("degraded", { detail: { mode: _mode } }));
+  }
+
+  voiceUnavailable(reason: string): void {
+    this.patch({
+      voiceAvailable: false,
+      voiceConnecting: false,
+      mode: "text",
+      activeRoomName: null,
+      banner:
+        reason === "csp"
+          ? "Voice blocked by browser security settings — use text chat"
+          : reason === "degraded"
+            ? "Live voice is temporarily unavailable. Use the voice clip button instead."
+            : "Voice temporarily unavailable",
+    });
+    this.dispatchEvent(new CustomEvent("voiceUnavailable", { detail: { reason } }));
+  }
+
+  roomFinished(): void {
+    this.patch({
+      mode: "text",
+      activeRoomName: null,
+      voiceConnecting: false,
+      banner: "Voice connection lost — switching to text chat",
+    });
+    this.dispatchEvent(new CustomEvent("roomFinished"));
+  }
+
+  sttUnavailable(): void {
+    this.patch({
+      sttAvailable: false,
+      loading: false,
+      banner: "Voice transcription temporarily unavailable — please type instead",
+    });
+    this.dispatchEvent(new CustomEvent("sttUnavailable"));
+  }
+
+  emitTranscript(content: string): void {
+    this.dispatchEvent(new CustomEvent("transcript", { detail: { content } }));
   }
 
   reset(): void {

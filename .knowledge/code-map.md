@@ -1,7 +1,8 @@
 # Code Map — Data Flow Trace
 
 > Use this to find which file handles which step.
-> `[PLANNED]` = spec exists, code not yet written. `[DONE]` = implemented.
+> Covers **spec 001** (AI CRM core) and **spec 002** (chat widget + WhatsApp audio).
+> `[PLANNED]` = not yet implemented. `[DONE]` / `[PARTIAL]` = in repo.
 
 ---
 
@@ -228,18 +229,134 @@ scripts/seed.ts                                                 [PLANNED]
 
 ---
 
+## Flow 5: Widget Text Chat (spec 002 — SC-001)
+
+```
+Customer types in embedded <crm-widget> shadow DOM
+ │
+ ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ STEP 1 — WIDGET CLIENT                         [DONE]            │
+│ apps/widget/src/modes/text.ts → sendText()                       │
+│   • POST /widget/chat + Bearer JWT                               │
+│   • ReadableStream SSE consumer → store.appendToken()              │
+│   • 401 → auth.ts handleUnauthorized() → store.sessionExpired()│
+└─────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ STEP 2 — WIDGET SERVER                         [DONE]            │
+│ scripts/widget-server.ts → handleChat()                          │
+│   • JWT auth + per-contact rate limit                            │
+│   • getOrCreateSession(sessionId, contactId) — 30min TTL         │
+│   • orchestrator.processIntentStream({ channel: "widget" })        │
+│   • SSE: token → done                                            │
+│   • OTel span: widget.chat                                       │
+└─────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+ (same orchestrator pipeline as Flow 1, Steps 2–10)
+```
+
+---
+
+## Flow 6: Widget Voice Clip (spec 002 — SC-002)
+
+```
+Customer holds mic button (≤60s)
+ │
+ ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ STEP 1 — RECORD + UPLOAD                       [DONE]            │
+│ apps/widget/src/modes/clip.ts                                    │
+│   • MediaRecorder (audio/webm) → multipart POST /widget/audio    │
+└─────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ STEP 2 — TRANSCODE + STT                       [DONE]            │
+│ scripts/widget-server.ts → handleAudio()                         │
+│   • scripts/audio-utils.ts → parseAudioUpload() + transcodeToRaw()│
+│   • features/calls/clip-transcriber.ts → CartesiaClipTranscriber │
+│   • ffmpeg absent → 503 { error: "audio unavailable", fallback } │
+└─────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ STEP 3 — STREAM REPLY                          [DONE]            │
+│ SSE: transcript frame → token frames → done                      │
+│ Widget: transcript → chat.appendTurn('customer', …, 'clip')      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Flow 7: Widget Live Voice (spec 002 — SC-003)
+
+```
+Customer toggles live voice
+ │
+ ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ STEP 1 — ROOM CREATION                          [DONE]            │
+│ apps/widget/src/modes/voice.ts → POST /widget/room               │
+│ scripts/widget-server.ts → LiveKitRoomAdapter.createWidgetRoom() │
+│   • Agent dispatch: crm-voice-agent                                │
+│   • 503 degraded → store.voiceUnavailable('degraded') → clip mode  │
+└─────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ STEP 2 — WEBRTC + AGENT                        [DONE]            │
+│ voice.ts loads livekit-client from CDN on first use (bundle size)│
+│ scripts/voice-agent.ts — LiveKit Agents worker, barge-in         │
+│ POST /livekit/webhook — room_started watchdog (15s no-pickup)    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Flow 8: WhatsApp Audio Ingress (spec 002 — SC-005)
+
+```
+WhatsApp user sends voice note
+ │
+ ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ STEP 1 — WEBHOOK + DOWNLOAD                    [DONE]            │
+│ scripts/worker.ts → processWhatsAppAudio()                       │
+│   • downloadWhatsAppAudio(mediaId) — node:http, Zod boundaries   │
+└─────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ STEP 2 — TRANSCODE + STT + ORCHESTRATE         [DONE]            │
+│ audio-utils.transcodeToRaw() → CartesiaClipTranscriber.finalize() │
+│ orchestrator.processIntent({ channel: "whatsapp", message })     │
+└─────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ STEP 3 — TTS REPLY                             [DONE]            │
+│ Cartesia TTS → upload media → send audio message                   │
+│ Fail → DLQ whatsapp_audio_fallback + text fallback message       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## File Inventory: What Each File Does
 
 ### `core/` — No external dependencies, pure logic
 
 | File | Status | Role |
 |---|---|---|
-| `core/ports.ts` | [DONE] | 11 port interfaces + 10 domain Zod schemas. The contract every adapter must fulfill. |
+| `core/ports.ts` | [DONE] | 12 port interfaces (+ `ILiveKitRoomManager`) + domain Zod schemas. |
 | `core/errors.ts` | [DONE] | Error hierarchy: IntegrationError, DatabaseDomainError, GraphTraversalError, CacheError, CircuitBreakerOpenError. PII auto-stripped from meta on IntegrationError. |
 | `core/logger.ts` | [DONE] | `createLogger(module)` → JSON log lines. PII sanitization on all meta keys. |
 | `core/sanitize.ts` | [DONE] | `validateAndFilterOutput()` strips profanity, PII, prompt injection from AI output. |
-| `core/circuit-breaker.ts` | [PLANNED] | State machine: closed → open (3 failures) → half-open (30s) → closed. Exposes OTel gauge. |
-| `core/orchestrator.ts` | [PLANNED] | `processIntent()` pipeline: 9 steps in order. Port-injected. Every step wrapped in tracer span. |
+| `core/circuit-breaker.ts` | [DONE] | State machine: closed → open (3 failures) → half-open (30s) → closed. |
+| `core/orchestrator.ts` | [DONE] | `processIntent()` / `processIntentStream()` pipeline. Port-injected. |
 
 ### `config/` — Boot-time setup
 
@@ -247,17 +364,18 @@ scripts/seed.ts                                                 [PLANNED]
 |---|---|---|
 | `config/env-schema.ts` | [DONE] | Zod schema for ALL env vars. Crashes on import if any required keys missing. |
 | `config/otel-bootstrap.ts` | [DONE] | OTel SDK setup: traces + metrics, 60s export interval, service name "ai-crm". |
-| `config/startup-validator.ts` | [PLANNED] | Sequential checks: env → Supabase → Neo4j → Redis → Gemini → BullMQ. 3 retries each. |
+| `config/startup-validator.ts` | [DONE] | Sequential checks + `registerWidgetStartupChecks()` (LiveKit, ffmpeg). |
 
 ### `adapters/` — Concrete implementations of port interfaces
 
 | File | Status | Role |
 |---|---|---|
-| `adapters/supabase/supabase-contact-store.ts` | [PLANNED] | `IContactStore` via Supabase. PII encrypt/decrypt transparently. |
-| `adapters/supabase/supabase-deal-store.ts` | [PLANNED] | `IDealStore` via Supabase. |
-| `adapters/supabase/supabase-call-store.ts` | [PLANNED] | `ICallStore` via Supabase. Transcript encrypt/decrypt. |
-| `adapters/supabase/supabase-ticket-store.ts` | [PLANNED] | `ITicketStore` via Supabase. |
-| `adapters/supabase/supabase-account-store.ts` | [PLANNED] | `IAccountStore` via Supabase. |
+| `adapters/supabase/contact-store.ts` | [DONE] | `IContactStore` via Supabase. |
+| `adapters/supabase/deal-store.ts` | [DONE] | `IDealStore` via Supabase. |
+| `adapters/supabase/call-store.ts` | [DONE] | `ICallStore` via Supabase. |
+| `adapters/supabase/ticket-store.ts` | [DONE] | `ITicketStore` via Supabase. |
+| `adapters/supabase/account-store.ts` | [DONE] | `IAccountStore` via Supabase. |
+| `adapters/livekit/livekit-room.adapter.ts` | [DONE] | `ILiveKitRoomManager` — room create, dispatch, webhook verify, healthCheck. |
 | `adapters/supabase/pgvector-cache.ts` | [DONE] | `ICacheStore` via pgvector `<=>` operator (inside `match_cache_embeddings` RPC). Stores response hash as `prompt_hash` for content-addressable dedup. Table: `public.cache_embeddings`. |
 | `adapters/neo4j/neo4j-graph-retriever.ts` | [PLANNED] | `IGraphRetriever` via Neo4j Cypher. 2-hop traversal. |
 | `adapters/neo4j/noop-retriever.ts` | [PLANNED] | `IGraphRetriever` fallback. Empty context. Used when Neo4j circuit is open. |
@@ -283,8 +401,8 @@ scripts/seed.ts                                                 [PLANNED]
 | `features/tickets/ticket.types.ts` | [PLANNED] | Ticket type + status/priority enums. |
 | `features/tickets/ticket.tools.ts` | [PLANNED] | `getTickets`, `createTicket` tools. |
 | `features/calls/call.types.ts` | [PLANNED] | Call type + transcript json + sentiment. |
-| `features/calls/call.transcriber.ts` | [PARTIAL] | Cartesia Sonic STT types + `ICartesiaTranscriber` contract. Impl in `scripts/voice-agent.ts`. |
-| `features/calls/call.summarizer.ts` | [PLANNED] | Post-call summarizer trigger. |
+| `features/calls/call.transcriber.ts` | [DONE] | Cartesia live STT types + contract. Impl in `scripts/voice-agent.ts`. |
+| `features/calls/clip-transcriber.ts` | [DONE] | `CartesiaClipTranscriber` — async clip STT (widget + WhatsApp). |
 | `features/pipeline/pipeline.types.ts` | [PLANNED] | PipelineStage type + ordered stages. |
 | `features/pipeline/pipeline.analyzer.ts` | [PLANNED] | Pipeline analyzer agent trigger. |
 
@@ -301,20 +419,34 @@ scripts/seed.ts                                                 [PLANNED]
 
 | File | Status | Role |
 |---|---|---|
-| `health/health-router.ts` | [PLANNED] | Bun.serve on port 8280. GET /health (liveness), GET /ready (degradation). |
-| `health/health-checks.ts` | [PLANNED] | Per-adapter checks: Supabase SELECT 1, Neo4j CALL db.ping(), Redis PING, Gemini cached. |
+| `health/health-router.ts` | [DONE] | Node http on :8280. GET /health, GET /ready (adapters array). |
+| `health/health-checks.ts` | [DONE] | Per-adapter checks; livekit (3s), cartesia, ffmpeg registrars. |
 
 ### Root `scripts/`
 
 | File | Status | Role |
 |---|---|---|
-| `scripts/worker.ts` | [PLANNED] | WhatsApp webhook consumer (BullMQ). Wires idempotency, DLQ, circuit breaker. |
-| `scripts/voice-agent.ts` | [PARTIAL] | LiveKit room agent. Cartesia Sonic STT + TTS, orchestrator. |
-| `scripts/seed.ts` | [PLANNED] | Supabase seed data insertion. |
-| `scripts/ingest.ts` | [PLANNED] | Neo4j graph ingestion from Supabase seed data. |
-| `scripts/eval-rag.ts` | [PLANNED] | DeepEval RAG triad against golden dataset. |
-| `scripts/validate.ts` | [PLANNED] | Pre-commit pipeline orchestrator. Runs all gates. |
-| `scripts/ast-firewall.ts` | [DONE] | 19-rule compile-time security scanner. `bun check`. |
+| `scripts/worker.ts` | [DONE] | WhatsApp webhook + text/audio pipelines, DLQ fallback. |
+| `scripts/voice-agent.ts` | [DONE] | LiveKit Agents worker (`crm-voice-agent`), Cartesia STT/TTS, barge-in. |
+| `scripts/widget-server.ts` | [DONE] | Widget HTTP :8290 — chat/audio/room routes, CORS, JWT, LiveKit webhook. |
+| `scripts/audio-utils.ts` | [DONE] | ffmpeg transcode, multipart parse, `isFfmpegAvailable()`. |
+| `scripts/ast-firewall.ts` | [DONE] | 28-rule compile-time security scanner. `pnpm check`. |
+
+### `apps/widget/` — Embeddable chat widget (spec 002)
+
+| File | Status | Role |
+|---|---|---|
+| `apps/widget/src/index.ts` | [DONE] | `<crm-widget>` custom element, `window.crmWidget` queue API. |
+| `apps/widget/src/widget.ts` | [DONE] | init/mount/open/close, health probe, component wiring. |
+| `apps/widget/src/store.ts` | [DONE] | EventTarget state — modes, degradation banners, blocked flag. |
+| `apps/widget/src/auth.ts` | [DONE] | JWT 401 → sessionExpired(). |
+| `apps/widget/src/modes/text.ts` | [DONE] | POST /widget/chat SSE consumer. |
+| `apps/widget/src/modes/clip.ts` | [DONE] | MediaRecorder + POST /widget/audio. |
+| `apps/widget/src/modes/voice.ts` | [DONE] | LiveKit room join; CDN-loaded livekit-client. |
+| `apps/widget/src/ui/chat.ts` | [DONE] | Message bubbles, streaming tokens, aria-live log. |
+| `apps/widget/src/ui/input.ts` | [DONE] | Textarea, send/mic/voice controls, degradation UI. |
+| `apps/widget/src/ui/styles.ts` | [DONE] | Shadow DOM CSS string. |
+| `apps/widget/vite.config.ts` | [DONE] | IIFE bundle; livekit-client external (≤100 KB gzip). |
 
 ---
 
@@ -322,23 +454,22 @@ scripts/seed.ts                                                 [PLANNED]
 
 ```
 1. Figure out the channel:
-   WhatsApp → scripts/worker.ts → line 1
-   Voice    → scripts/voice-agent.ts → line 1
-   Web      → apps/web/src/main.ts → line 1
+   WhatsApp → scripts/worker.ts
+   Voice (PSTN/LiveKit agent) → scripts/voice-agent.ts
+   Widget text/clip → apps/widget → scripts/widget-server.ts
+   Widget live voice → apps/widget/modes/voice.ts → widget-server → voice-agent
+   Web dashboard → apps/web/src/main.ts
 
 2. Follow to the orchestrator:
-   Both worker.ts and voice-agent.ts call:
+   worker.ts, voice-agent.ts, widget-server.ts all call:
    core/orchestrator.ts → processIntent() or processIntentStream()
 
 3. The orchestrator calls interfaces (NEVER adapters directly):
-   All 11 interfaces defined in: core/ports.ts
+   All interfaces defined in: core/ports.ts (12 ports)
 
-4. To find which adapter implements an interface:
-   Search for "implements I<Name>" in adapters/
-
-5. To understand a specific step:
-   Step names are in the flow diagrams above.
-   Each step maps 1:1 to an interface method call in orchestrator.ts
+4. Widget-specific I/O (not orchestrator ports):
+   ILiveKitRoomManager → adapters/livekit/livekit-room.adapter.ts
+   CartesiaClipTranscriber → features/calls/clip-transcriber.ts
 ```
 
 ## Quick Reference: "Where is X?"
@@ -350,7 +481,12 @@ scripts/seed.ts                                                 [PLANNED]
 | Where are RLS policies? | `supabase/migrations/` (Task 3.4, [PLANNED]) |
 | Where does the circuit breaker live? | `core/circuit-breaker.ts` [PLANNED] |
 | Where are agent system prompts? | `agents/crm-agent.ts` (Task 7, [PLANNED]) |
-| Where is the health endpoint? | `health/health-router.ts` on `:8280` [PLANNED] |
-| Where are tests? | Not yet created (see discussion) |
+| Where is the health endpoint? | `health/health-router.ts` on `:8280` [DONE] |
+| Where is the widget server? | `scripts/widget-server.ts` on `:8290` [DONE] |
+| Where is the embeddable widget? | `apps/widget/dist/widget.js` (IIFE, shadow DOM) [DONE] |
+| Where is clip/WhatsApp STT? | `features/calls/clip-transcriber.ts` [DONE] |
+| Where is ffmpeg transcoding? | `scripts/audio-utils.ts` [DONE] |
+| Where are widget self-checks? | `packages/ai-core/src/__tests__/*.selfcheck.ts` [DONE] |
+| How do I run everything locally? | [.knowledge/run-and-verify.md](./run-and-verify.md) |
 | Where are env vars validated? | `config/env-schema.ts` [DONE] |
 | Where is telemetry set up? | `config/otel-bootstrap.ts` [DONE] |

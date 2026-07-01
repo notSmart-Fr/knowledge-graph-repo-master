@@ -4,5 +4,8 @@ packages:
   - "apps/*"
   - "apps/widget"
 allowBuilds:
+  '@livekit/local-inference': set this to true or false
   esbuild: true
+  iltorb: set this to true or false
   protobufjs: true
+  sharp: set this to true or false

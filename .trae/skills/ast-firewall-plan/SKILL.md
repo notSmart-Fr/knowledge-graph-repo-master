@@ -1,26 +1,27 @@
 ---
 name: "ast-firewall-plan"
-description: "Produce a concrete implementation plan from the gap analysis. Reads ast-firewall-analysis.md (produced by discover or analyze), converts gaps/rules into ordered implementation tasks with priorities and file placement. Invoke after discover or analyze."
+description: "Produce a concrete implementation plan from the gap analysis. Reads ast-firewall-analysis.md (produced by discover, analyze, or surface), converts gaps/rules into ordered implementation tasks with priorities and file placement. Invoke after discover, analyze, or surface."
 ---
 
 # AST Firewall Plan
 
 ## Purpose
 
-Reads `.knowledge/ast-firewall-analysis.md` (produced by `/ast-firewall-discover` or `/ast-firewall-analyze`) and converts the raw gaps/rules catalog into an ordered, actionable implementation plan with concrete tasks.
+Reads `.knowledge/ast-firewall-analysis.md` (produced by `/ast-firewall-discover`, `/ast-firewall-analyze`, or `/ast-firewall-surface`) and converts the raw gaps/rules catalog into an ordered, actionable implementation plan with concrete tasks.
 
 ## The Pipeline
 
 ```
 /ast-firewall-discover   →  .knowledge/ast-firewall-analysis.md  (WHAT: rule catalog for new project)
-/ast-firewall-analyze    →  .knowledge/ast-firewall-analysis.md  (WHAT: gap analysis for existing project)
+/ast-firewall-analyze    →  .knowledge/ast-firewall-analysis.md  (WHAT: constitutional gap analysis)
+/ast-firewall-surface    →  .knowledge/ast-firewall-analysis.md  (WHAT: feature surface gaps — after speckit-plan)
 /ast-firewall-plan       →  .knowledge/ast-firewall-plan.md      (HOW: ordered implementation tasks)
 /ast-firewall-implement  →  scripts/ast-firewall.ts              (CODE: working ts-morph rules)
 ```
 
 ## Prerequisites
 
-- `.knowledge/ast-firewall-analysis.md` MUST exist (run `/ast-firewall-discover` or `/ast-firewall-analyze` first)
+- `.knowledge/ast-firewall-analysis.md` MUST exist (run `/ast-firewall-discover`, `/ast-firewall-analyze`, and/or `/ast-firewall-surface` first)
 
 ## Inputs
 

@@ -67,8 +67,13 @@ const startupChecks: StartupCheck[] = [
     required: true,
   },
   {
-    name: "GEMINI_API_KEY",
-    check: () => checkEnvVar("GEMINI_API_KEY"),
+    name: "LLM_PROVIDER",
+    check: () => {
+      if (checkEnvVar("GEMINI_API_KEY")) return true;
+      if (checkEnvVar("DEEPSEEK_API_KEY")) return true;
+      const url = getEnvVar("LOCAL_LLM_URL");
+      return url !== undefined && isValidUrl(url);
+    },
     required: true,
   },
   {

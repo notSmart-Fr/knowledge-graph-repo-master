@@ -1,4 +1,5 @@
 import { store } from "../store.js";
+import { handleUnauthorized } from "../auth.js";
 
 export interface SendTextResult {
   ok: boolean;
@@ -27,7 +28,7 @@ export async function sendText(
   });
 
   if (response.status === 401) {
-    store.sessionExpired();
+    await handleUnauthorized(response);
     return { ok: false, error: "auth" };
   }
   if (response.status === 429) {
