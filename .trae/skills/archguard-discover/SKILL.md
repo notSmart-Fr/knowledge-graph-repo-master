@@ -29,23 +29,23 @@ Read `package.json`. Extract:
 - `packageManager` → pnpm/npm/yarn/bun
 - `workspaces` → monorepo structure if present
 
-### Step 2: Discover project structure
+Step 2.1: Map discovered directories to architectural roles
 
-Before scanning individual files, understand the project layout:
+For each top-level source directory, classify it by scanning for common patterns:
+- If a directory contains files that import from other directories but are rarely imported themselves → likely `core-layer`
+- If a directory primarily contains external integrations (DB, HTTP clients, SDKs) → likely `adapter-layer`
+- If a directory contains configuration/schemas/environment files → likely `config-layer`
 
-```
-- List top-level directories and their purpose (infer from common conventions:
-    src/, lib/, packages/, apps/, scripts/, tests/, core/, features/, adapters/)
-- Identify monorepo vs single-package structure
-- Note any tsconfig.json paths/baseUrl/aliases that define layer boundaries
-- Note any existing ESLint/ArchUnit config files
-```
+Fallback for whitelist paths:
+- If no clear `<core-layer>` found → default to `src/utils/` or `lib/`
+- If no clear `<adapter-layer>` found → default to `src/integrations/` or `src/lib/`
+- If no clear `<config-layer>` found → default to `src/config/`
 
-Use this structure to parameterize the map scans below — do NOT assume directory names like `core/` or `adapters/`.
+The whitelist file names (e.g., `safe-parse.ts`) are **suggestions**. The skill should adapt the exact name to the project's naming conventions (e.g., `safe-parse.ts` vs `parse-utils.ts` vs `validation.ts`).
 
 ### Step 2.5: Generate Invariant-Derived Bans
 
-These 10 bans are the axioms. They apply to every project. No user confirmation needed. No dependency check needed — they're universal. Generate them immediately.
+These 11 bans are the axioms. They apply to every project. No user confirmation needed. No dependency check needed — they're universal. Generate them immediately.
 
 | # | Ban | FM | Condition | ESLint Rule/Selector | Whitelist |
 |---|-----|-----|-----------|----------------------|-----------|
@@ -411,6 +411,7 @@ Also write **`.archguard/tech-context.json`**:
   "generatedAt": "<ISO timestamp>",
   "dependencies": {
     "<package-name>": {
+      "installedVersion": "<semver from package.json>",
       "q1_rawEscape": { "triggered": true, "ban": "<description>", "fm": "FM1" },
       "q2_unbounded": { "triggered": false },
       "q3_trustBoundary": { "triggered": true, "ban": "<description>", "fm": "FM1" },
@@ -420,6 +421,18 @@ Also write **`.archguard/tech-context.json`**:
   }
 }
 ```
+
+Also write **`.archguard/maps/.meta.json`** (baseline for incremental analysis):
+
+```json
+{
+  "generatedAt": "<ISO timestamp>",
+  "lastCommitHash": "<git rev-parse HEAD at time of scan>",
+  "lastAnalyzedAt": "<ISO timestamp>"
+}
+```
+
+This gives `archguard-analyze --changed` a valid commit SHA to diff against from the very first incremental run.
 
 ## Constraints
 

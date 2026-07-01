@@ -30,14 +30,11 @@ Check what already exists and read their contents:
 
 ### Step 2: Write ESLint config
 
-Merge plan rules into ESLint config.
+**Determine the correct file extension:**
+- If `package.json` has `"type": "module"` → use `eslint.config.js` or `eslint.config.mjs`
+- If `package.json` has `"type": "commonjs"` or no `"type"` field → use `eslint.config.cjs`
 
-**If config exists:** Preserve all existing rules. Add new rules from the plan. Do not remove or modify existing rules unless they directly conflict with a new plan rule (same name + different config).
-
-**If no config exists:** Create one with the appropriate extension:
-- If `package.json` has `"type": "module"` → create `eslint.config.cjs`
-- If `package.json` has no type field or `"type": "commonjs"` → create `eslint.config.js`
-- Always use flat config format: `module.exports = [...]`
+**Always use flat config format:** `module.exports = [...]`
 
 **Required base rules (always include unless already present):**
 - `@typescript-eslint/no-explicit-any: "error"` — type escape hatch ban
@@ -128,11 +125,20 @@ export async function safe<Operation>(<params>): Promise<<return-type>> {
 
 ### Step 6: Verify
 
-After writing all files:
-1. Run the project's lint command (detected from package.json scripts — `pnpm lint`, `npm run lint`, `eslint .`, etc.)
-2. If it fails, fix the ESLint config and retry.
-3. Run ArchUnit tests: `vitest run tests/architecture.test.ts` (adapt to project's test runner)
-4. If tests fail, check if existing code violates new rules. If so, report to user — they may need to refactor or add exceptions.
+**Detect the lint command:**
+1. Read `package.json` scripts.
+2. Look for `"lint"` → if exists, run `pnpm lint` (or `npm run lint` / `yarn lint` based on detected package manager).
+3. If no `"lint"` script exists, run `eslint . --ext .ts,.tsx` directly.
+
+**Detect the test command:**
+1. Look for `"test"` or `"test:arch"` in `package.json` scripts.
+2. If `"test:arch"` exists, run `pnpm test:arch` (or equivalent).
+3. If no specific test script exists, run `vitest run tests/architecture.test.ts` if `vitest` is installed.
+4. If `vitest` is not installed, check for `jest` and run `jest tests/architecture.test.ts`.
+
+**If verification fails:**
+- Lint failure: Check if the ESLint config syntax is valid. Fix and retry.
+- Test failure: Existing code may violate new ArchUnit rules. Report to user with the specific failing test.
 
 ### Step 7: Write summary
 

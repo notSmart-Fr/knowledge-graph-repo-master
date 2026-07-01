@@ -45,38 +45,107 @@ Read all four JSON map files and tech-context.json into memory. These are the ba
 
 #### If `--pkg <name>`:
 
-1. Read `package.json` to find the package's actual installed version
-2. Run the **5 Escape Hatch Questions** on this single package
-3. Output: which Qs triggered, what bans are needed
-4. **Search the codebase** for imports of this package — for each import found:
+1. Read `package.json` to find the package's **current installed version**.
+
+2. Check `.archguard/tech-context.json` for an existing entry:
+   - If the package already exists in tech-context.json:
+     - Compare the `installedVersion` in the JSON with the current version.
+     - **Same version** → Skip Q1-Q5. This package was already analyzed. Output: `✓ <name>@<version>: unchanged, skipping.`
+     - **Different version** → The API surface may have changed. Re-run Q1-Q5.
+   - If the package does NOT exist → it's a new dependency. Run Q1-Q5.
+
+3. Run the **5 Escape Hatch Questions** on this single package (only if version changed or new).
+4. Output: which Qs triggered, what bans are needed.
+5. **Search the codebase** for imports of this package — for each import found:
    - If the package is a DB driver → add to resources-mutations.json as DB query/mutation
    - If the package is an HTTP framework → add to trust-boundaries.json and output-surfaces.json
    - If the package is a realtime library → add to trust-boundaries.json and output-surfaces.json and resources-mutations.json
    - If Q4 triggered (platform split) → check if any import is in the wrong platform context
 
-5. Append results to tech-context.json and affected map files
+6. Write/update the entry in tech-context.json, **always including `installedVersion`**.
 
 #### If `--file <path>`:
 
-1. Read the file
-2. Scan for patterns from all 4 map categories:
+1. **Check if the file path belongs to a known layer.**
+   - Read Map B's `.archguard/maps/dependency-graph.json` to get the current `layers` array.
+   - If the file's directory does NOT match any existing layer path prefix:
+     ```
+     ⚠ New path detected: <path>. Not mapped to any known layer.
+        → Run archguard-clarify to classify this path's layer role.
+     ```
+     Do NOT auto-assign a layer. Continue scanning for Map A/C/D patterns
+     (those don't depend on layer classification), but flag the unknown layer
+     for clarify.
+   - If the file DOES match a known layer → proceed normally.
+
+2. Read the file
+3. Scan for patterns from all 4 map categories:
    - Map A: Does it contain trust boundary patterns?
    - Map C: Does it contain output surface patterns?
    - Map D: Does it contain resource/mutation patterns?
-3. For each match found, add entry to the corresponding map JSON
-4. For Map B: scan the file's import statements. Flag any cross-layer violations.
-5. Run FM6 detection on any new function bodies (consecutive mutations)
+4. For each match found, add entry to the corresponding map JSON
+5. For Map B: scan the file's import statements. Flag any cross-layer violations (only meaningful if the file's layer is known).
+6. Run FM6 detection on any new function bodies (consecutive mutations)
 
 #### If `--dir <path>`:
 
-Same as `--file` but recursively applied to all `.ts`/`.tsx`/`.js`/`.jsx` files in the directory.
+1. **Check if the directory path belongs to a known layer** (same as `--file` step 1 above).
+   - If the directory is entirely new and not mapped to any layer:
+     ```
+     ⚠ New directory detected: <path>. Not mapped to any known layer.
+        → Run archguard-clarify to classify this directory's layer role
+          and update dependency direction rules.
+     ```
+     Scan for Map A/C/D patterns regardless, but flag that Map B rules
+     may need updating after clarify.
+
+2. Recursively apply `--file` scan to all `.ts`/`.tsx`/`.js`/`.jsx` files in the directory.
+
+**Why this matters:** Auto-assigning a new directory to the wrong layer (e.g., treating a new data-ingestion module as "Core" when it's actually an "Adapter") means ArchUnit rules will either miss violations or generate false positives. The architectural intent of the new directory can only come from the developer.
 
 #### If `--changed`:
 
-1. Run `git diff --name-only` since the `generatedAt` timestamp in the map files
-2. For each changed file, run the `--file` scan
-3. For any deleted files, remove their entries from all map JSONs
-4. For `package.json` changes: detect added/removed dependencies, run `--pkg` for each
+```
+--changed    → Scan all files changed since the last snapshot (uses git commit SHA)
+--changed --base <ref>    → Diff against a specific git ref instead of last snapshot
+```
+
+**Determine the base reference:**
+
+1. Read `.archguard/maps/.meta.json` to get:
+   - `lastCommitHash` — the commit SHA from the last successful `discover` or `analyze` run.
+   - `generatedAt` — the timestamp (for human reference only, NOT for git diff).
+
+2. **Choose the diff base:**
+   - If `--base <ref>` was provided → use `<ref>` directly.
+   - If `lastCommitHash` exists in `.meta.json` → use `lastCommitHash`.
+   - If neither exists (first incremental run) → use `HEAD~1` (compare against previous commit).
+
+3. **Run the diff:**
+   ```
+   git diff --name-only <base> HEAD
+   ```
+   This reliably works in CI, across branches, and on different machines.
+
+4. For each changed file, run the `--file` scan (see above).
+5. For any deleted files, remove their entries from all map JSONs.
+6. Scan `package.json` for added/removed dependency changes:
+   ```
+   git diff --name-only <base> HEAD -- package.json
+   ```
+   If changed, detect added/removed/new-version dependencies and run `--pkg` for each.
+
+**After scanning, update `.meta.json`:**
+```
+Write current HEAD commit SHA back to .archguard/maps/.meta.json:
+{
+  "generatedAt": "<ISO timestamp>",
+  "lastCommitHash": "<git rev-parse HEAD>",
+  "lastAnalyzedAt": "<ISO timestamp>"
+}
+```
+
+**Why commit SHA, not timestamp:** `git diff` does NOT accept timestamps. It accepts commit SHAs, branch names, or tree-ish refs. Filesystem modification times are unreliable across machines, CI runs, and `git checkout` operations. Commit SHAs are deterministic.
 
 ### Step 3: Compute the diff
 
@@ -163,6 +232,7 @@ Analyze modifies these files (merge, never replace):
 - `.archguard/maps/dependency-graph.json`
 - `.archguard/maps/output-surfaces.json`
 - `.archguard/maps/resources-mutations.json`
+- `.archguard/maps/.meta.json`
 - `.archguard/tech-context.json`
 - `.archguard/discover.md` (appended)
 
