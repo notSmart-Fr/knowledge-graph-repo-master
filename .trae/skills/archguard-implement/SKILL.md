@@ -17,56 +17,78 @@ archguard-discover → archguard-clarify → archguard-plan → archguard-implem
 ## Prerequisites
 
 - `.archguard/plan.md` must exist.
-- Existing `eslint.config.*` and `tests/architecture.test.ts` should be read first (if they exist) to understand what's already in place.
+- Existing ESLint config and ArchUnit tests should be read first (if they exist).
 
 ## Procedure
 
 ### Step 1: Read existing configs
 
-Check what already exists:
+Check what already exists and read their contents:
 - `eslint.config.js`, `eslint.config.mjs`, `eslint.config.cjs`
-- `tests/architecture.test.ts`
+- `tests/architecture.test.ts` (or wherever ArchUnit tests live)
 - `tsconfig.json` (or `tsconfig.base.json`)
 
 ### Step 2: Write ESLint config
 
-Merge plan rules into ESLint config. If config exists, preserve existing rules and add new ones. If not, create the file.
+Merge plan rules into ESLint config.
 
-Format: **Flat config (eslint.config.cjs)** — `module.exports = [...]`
+**If config exists:** Preserve all existing rules. Add new rules from the plan. Do not remove or modify existing rules unless they directly conflict with a new plan rule (same name + different config).
 
-Rules to write:
-- All ESLint rules from the plan
-- Ensure `@typescript-eslint/no-explicit-any: "error"` is included (FM2 type safety)
-- Ensure `@typescript-eslint/no-floating-promises: "error"` is included (FM5)
-- Ensure `@typescript-eslint/ban-ts-comment` is included (FM2 type safety)
+**If no config exists:** Create one with the appropriate extension:
+- If `package.json` has `"type": "module"` → create `eslint.config.cjs`
+- If `package.json` has no type field or `"type": "commonjs"` → create `eslint.config.js`
+- Always use flat config format: `module.exports = [...]`
 
-For each `no-restricted-syntax` entry:
+**Required base rules (always include unless already present):**
+- `@typescript-eslint/no-explicit-any: "error"` — type escape hatch ban
+- `@typescript-eslint/no-floating-promises: "error"` — FM5
+- `@typescript-eslint/ban-ts-comment` — type escape hatch ban
+
+**Format for no-restricted-syntax entries:**
 ```js
 {
-  selector: "...",
-  message: "...",
+  selector: "<ESLint selector from plan>",
+  message: "<message from plan>",
 }
 ```
 
-### Step 3: Write ArchUnit tests
+For selectors that should NOT apply to whitelist files, add a separate config object with `files` and `ignores`:
+```js
+{
+  files: ["**/*.ts", "**/*.tsx"],
+  ignores: ["<whitelist-file-path>"],
+  rules: {
+    "no-restricted-syntax": ["error", { selector: "...", message: "..." }]
+  }
+}
+```
 
-Merge plan rules into `tests/architecture.test.ts`. Preserve existing tests, add new ones.
+### Step 3: Write/merge ArchUnit tests
 
-Each rule:
+If `tests/architecture.test.ts` exists: preserve existing tests. Add new ones from the plan.
+
+If it doesn't exist: create it with imports and describe block.
+
+**Each test from the plan:**
 ```typescript
-it('RULE NAME', async () => {
+it('<description>', async () => {
   const rule = projectFiles()
-    .inFolder('PATH')
+    .inFolder('<inner layer path from plan>')
     .shouldNot()
     .dependOnFiles()
-    .inFolder('OTHER_PATH');
+    .inFolder('<outer layer path from plan>');
   await expect(rule).toPassAsync();
 });
 ```
 
 ### Step 4: Update tsconfig.json
 
-Add/verify these compiler options:
+For each TypeScript config change in the plan:
+- If the option is already set to the desired value → skip
+- If the option is set to a different value → warn the user before changing
+- If the option is missing → add it
+
+Common additions:
 ```json
 {
   "compilerOptions": {
@@ -76,44 +98,63 @@ Add/verify these compiler options:
 }
 ```
 
-Add `@typescript-eslint` parser options to `.vscode/settings.json` or eslint config for type-aware rules.
-
 ### Step 5: Create whitelist files
 
 For each whitelist file in the plan marked "to create":
-- Create the directory if needed
-- Write the file with a skeleton implementation and a comment block:
 
+1. Create the directory if it doesn't exist
+2. Create the file with:
+   - A comment block explaining WHY this is the only place the primitive is allowed
+   - A skeleton function signature
+   - The safety mechanism wired in (validation, timeout, circuit breaker, sanitization)
+
+Example skeleton (content adapts to the actual ban):
 ```typescript
 /**
- * SAFE FETCH — the ONLY place fetch() is allowed.
- * Wraps native fetch with: Zod parsing, AbortSignal timeout, circuit breaker.
+ * SAFE <PRIMITIVE> — the ONLY place <banned-API> is allowed.
  *
- * DO NOT call fetch() directly anywhere else. ESLint will block it.
+ * Wraps the banned primitive with:
+ *   - <safety-mechanism-1>
+ *   - <safety-mechanism-2>
+ *
+ * ESLint blocks direct use of <banned-API> everywhere else.
+ * See .archguard/plan.md for the full rule set.
  */
-export async function safeFetch<T>(...) { ... }
+export async function safe<Operation>(<params>): Promise<<return-type>> {
+  // TODO: implement safety wrapper
+  throw new Error("Not implemented — generated by archguard-implement");
+}
 ```
 
 ### Step 6: Verify
 
 After writing all files:
-1. Run `pnpm lint` (or `eslint . --ext .ts,.tsx`) to verify ESLint config is valid.
-2. Run `pnpm test:arch` (or `vitest run tests/architecture.test.ts`) to verify ArchUnit tests pass.
-3. Report any failures.
+1. Run the project's lint command (detected from package.json scripts — `pnpm lint`, `npm run lint`, `eslint .`, etc.)
+2. If it fails, fix the ESLint config and retry.
+3. Run ArchUnit tests: `vitest run tests/architecture.test.ts` (adapt to project's test runner)
+4. If tests fail, check if existing code violates new rules. If so, report to user — they may need to refactor or add exceptions.
 
 ### Step 7: Write summary
 
 ```
-├── eslint.config.cjs          (N rules: X new, Y existing)
-├── tests/architecture.test.ts  (M tests: A new, B existing)
-├── tsconfig.json               (updated: [list changes])
-├── Whitelist files created:    [list]
-└── .archguard/plan.md          (plan executed)
+Architectural guards implemented:
+
+├── eslint.config.<ext>           (N rules: X new, Y existing)
+├── tests/architecture.test.ts    (M tests: A new, B existing)
+├── tsconfig.json                 (updated: [list changes or "no changes needed"])
+├── Whitelist files created:      [list of paths]
+└── .archguard/plan.md            (plan executed)
+
+Verification:
+  Lint:    [passed/failed — if failed, what broke]
+  ArchUnit: [passed/failed — if failed, which rules]
 ```
 
 ## Constraints
 
-- **Merge, don't replace.** If eslint.config or architecture.test exists, add to it — never delete existing rules.
-- **Test after writing.** Run lint + test:arch immediately. If they fail, fix before reporting done.
-- **Use `.cjs` extension** for ESLint flat config if the project has `"type": "module"` in package.json. This avoids ESM/CJS conflicts.
-- Do not install new npm packages unless the plan explicitly requires them (e.g., `archunit`, `@typescript-eslint/eslint-plugin`).
+- **Merge, don't replace.** If config files exist, add to them. Never delete rules the user already has.
+- **Test immediately.** Run lint + ArchUnit tests. If they fail, fix before reporting done.
+- **Use the project's actual file extensions.** Detect from package.json `type` field. Don't assume `.cjs` or `.mjs`.
+- **Use the project's actual directory names.** Whitelist paths use the layer names discovered in Map B.
+- **Do NOT install new npm packages** unless the plan requires them and they're not already in package.json. If a required package (e.g., `archunit`, `@typescript-eslint/eslint-plugin`) is missing, note it and ask the user before installing.
+- **The whitelist skeleton is a stub.** It's marked with `TODO` intentionally — the user fills in the implementation.
