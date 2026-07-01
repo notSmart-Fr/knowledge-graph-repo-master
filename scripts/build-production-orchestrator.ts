@@ -15,6 +15,7 @@ import { Neo4jGraphRetriever } from "../packages/ai-core/src/adapters/neo4j/neo4
 import { MastraAgentProvider } from "../packages/ai-core/src/adapters/ai/mastra-agent.js";
 import { GeminiEmbeddingProvider } from "../packages/ai-core/src/adapters/ai/gemini-embedding.js";
 import { CachedEmbeddingProvider } from "../packages/ai-core/src/adapters/ai/cached-embedding.js";
+import { OllamaEmbeddingProvider } from "../packages/ai-core/src/adapters/ai/ollama-embedding.js";
 import { PgVectorCache } from "../packages/ai-core/src/adapters/supabase/pgvector-cache.js";
 import { createIdempotencyStore } from "../packages/ai-core/src/adapters/messaging/idempotency.js";
 import { getEnv } from "../packages/ai-core/src/config/env-schema.js";
@@ -31,7 +32,10 @@ function buildEmbeddingProvider(): IEmbeddingProvider {
   if (env.GEMINI_API_KEY) {
     return new CachedEmbeddingProvider(new GeminiEmbeddingProvider());
   }
-  // ponytail: zero-vector when no Gemini — semantic cache disabled; Ollama chat still works
+  // ponytail: try Ollama embedding before falling back to zero-vector
+  if (env.LOCAL_LLM_URL) {
+    return new OllamaEmbeddingProvider();
+  }
   return {
     embed: async () => new Array(768).fill(0),
     embedBatch: async (texts) => texts.map(() => new Array(768).fill(0)),
