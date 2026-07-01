@@ -1,4 +1,5 @@
-import type { CRMGraphContext, OrchestratorResponse } from "../core/ports.js";
+import { timeService } from "../core/time-service.js";
+import type { CRMGraphContext, OrchestratorResponse, MastraTool } from "../core/ports.js";
 import { OrchestratorResponseSchema } from "../core/ports.js";
 import { MastraAgentProvider } from "../adapters/ai/mastra-agent.js";
 import { createLogger } from "../core/logger.js";
@@ -128,7 +129,7 @@ export class CRMAgent {
     context: CRMGraphContext,
     userMessage?: string
   ): Promise<OrchestratorResponse> {
-    const startTime = Date.now();
+    const startTime = timeService.now();
     const toolsUsed: string[] = [];
 
     logger.info("CRM agent generating response", {
@@ -170,7 +171,7 @@ export class CRMAgent {
       logger.info("CRM agent response generated", {
         responseLength: validated.text.length,
         contextFields,
-        durationMs: Date.now() - startTime,
+        durationMs: timeService.durationMs(startTime),
       });
 
       return {

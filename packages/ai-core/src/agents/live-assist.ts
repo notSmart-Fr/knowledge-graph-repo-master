@@ -8,6 +8,7 @@
  * Usage: subscribed to by agent dashboard in real-time
  */
 
+import { timeService } from "../core/time-service.js";
 import { z } from "zod";
 import { MastraAgentProvider } from "../adapters/ai/mastra-agent.js";
 import type { CRMGraphContext } from "../core/ports.js";
@@ -20,7 +21,7 @@ export const LiveAssistPromptSchema = z.object({
   type: z.enum(["suggestion", "objection", "context", "warning", "opportunity"]),
   text: z.string().min(1).max(280),
   priority: z.enum(["low", "medium", "high"]),
-  relatedData: z.record(z.string(), z.unknown()).optional(),
+  relatedData: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
   agentActionable: z.boolean().default(true),
 });
 
@@ -43,7 +44,7 @@ export class LiveAssistAgent {
   }
 
   async generatePrompt(input: LiveAssistInput): Promise<LiveAssistPrompt> {
-    const startTime = Date.now();
+    const startTime = timeService.now();
 
     logger.debug("Generating live-assist prompt", {
       callId: input.callId,
@@ -58,7 +59,7 @@ export class LiveAssistAgent {
       logger.debug("Live-assist prompt generated", {
         callId: input.callId,
         type: parsed.type,
-        durationMs: Date.now() - startTime,
+        durationMs: timeService.durationMs(startTime),
       });
 
       return parsed;

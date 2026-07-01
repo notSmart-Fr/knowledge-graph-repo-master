@@ -4,15 +4,14 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import { env } from './env-schema.js';
 
 const exporter = new OTLPTraceExporter({
-  url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://localhost:4318/v1/traces',
+  url: env.OTEL_EXPORTER_OTLP_ENDPOINT + '/v1/traces',
 });
 
-const serviceNameLabel = process.env.OTEL_SERVICE_NAME ?? 'ai-crm';
-
 const metricExporter = new OTLPMetricExporter({
-  url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://localhost:4318/v1/metrics',
+  url: env.OTEL_EXPORTER_OTLP_ENDPOINT + '/v1/metrics',
 });
 const meterProvider = new MeterProvider({
   readers: [new PeriodicExportingMetricReader({ exporter: metricExporter, exportIntervalMillis: 60000 })],
@@ -21,6 +20,6 @@ metrics.setGlobalMeterProvider(meterProvider);
 
 export const sdk = new NodeSDK({
   traceExporter: exporter,
-  serviceName: serviceNameLabel,
+  serviceName: env.OTEL_SERVICE_NAME,
 });
 sdk.start();

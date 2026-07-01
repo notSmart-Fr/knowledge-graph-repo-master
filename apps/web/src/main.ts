@@ -45,4 +45,4 @@ if (import.meta.env.DEV) {
   (window as unknown as { __crmStore: typeof store }).__crmStore = store;
 }
 
-console.info("[crm-dashboard] booted");
+// no console — structured logging not available in dashboard

@@ -10,7 +10,6 @@ const OllamaEmbeddingResponseSchema = z.object({
   embedding: z.array(z.number()),
 });
 
-const DEFAULT_MODEL = "nomic-embed-text";
 const DEFAULT_DIM = 768;
 
 /** Embedding provider backed by a local Ollama instance. Zero API cost. */
@@ -19,7 +18,7 @@ export class OllamaEmbeddingProvider implements IEmbeddingProvider {
   private readonly model: string;
 
   constructor(model?: string) {
-    this.model = model ?? process.env.OLLAMA_EMBED_MODEL ?? DEFAULT_MODEL;
+    this.model = model ?? env.OLLAMA_EMBED_MODEL;
   }
 
   async embed(text: string): Promise<number[]> {

@@ -1,11 +1,12 @@
 import type { Deal } from "../core/ports.js";
+import { timeService } from "../core/time-service.js";
 import { createLogger } from "../core/logger.js";
 
 const logger = createLogger("pipeline-analyzer");
 
 export class PipelineAnalyzer {
   async analyzeStaleDeals(deals: Deal[]): Promise<string> {
-    const summary = `Pipeline Analysis Report (${new Date().toISOString()})
+    const summary = `Pipeline Analysis Report (${timeService.toISO()})
 Total Stale Deals (>30 days without stage change): ${deals.length}
 
 Details:

@@ -42,6 +42,8 @@ export const envSchema = z.object({
   DEEPSEEK_API_KEY: z.string().startsWith("sk-").optional(),
   DEEPSEEK_API_URL: z.string().url().default("https://api.deepseek.com/chat/completions"),
   LOCAL_LLM_URL: z.string().url().default("http://localhost:11434").optional(),
+  // Ollama
+  OLLAMA_EMBED_MODEL: z.string().default("nomic-embed-text"),
   // Voice (optional — required only for voice/WhatsApp channels)
   LIVEKIT_URL: z.string().url().optional().default("wss://localhost:7880"),
   LIVEKIT_API_KEY: z.string().min(3).optional().default("dev-key"),

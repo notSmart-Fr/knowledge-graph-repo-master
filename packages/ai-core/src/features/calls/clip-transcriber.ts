@@ -128,7 +128,7 @@ export class CartesiaClipTranscriber {
           ws.send("finalize");
         });
 
-        span.setAttribute("transcript_length", transcript.length);
+        span.setAttribute("audio_length", transcript.length);
         return transcript;
       } catch (error: unknown) {
         span.recordException(error instanceof Error ? error : new Error(String(error)));

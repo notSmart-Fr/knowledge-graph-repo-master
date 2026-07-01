@@ -10,6 +10,7 @@
  * Usage: bun run scripts/voice-agent.ts
  */
 
+import { timeService } from "../core/time-service.js";
 import { z } from "zod";
 import { MastraAgentProvider } from "../adapters/ai/mastra-agent.js";
 import { createLogger } from "../core/logger.js";
@@ -49,7 +50,7 @@ export class CallSummarizerAgent {
   }
 
   async summarize(input: CallSummarizerInput): Promise<CallSummary> {
-    const startTime = Date.now();
+    const startTime = timeService.now();
 
     logger.info("Summarizing call", {
       callId: input.callId,
@@ -76,7 +77,7 @@ export class CallSummarizerAgent {
         callId: input.callId,
         actionItems: summary.action_items.length,
         topics: summary.key_topics.length,
-        durationMs: Date.now() - startTime,
+        durationMs: timeService.durationMs(startTime),
       });
 
       return summary;
