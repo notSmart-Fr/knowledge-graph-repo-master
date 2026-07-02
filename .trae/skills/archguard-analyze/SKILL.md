@@ -182,7 +182,7 @@ Examples of status changes (examples only, NOT hardcoded rules owned by analyze)
 - A new unbounded loop appears → a resilience invariant may become active
 - A deleted file removes the last occurrence of a banned primitive → that invariant may become inactive
 
-`archguard-analyze` owns diffing and status updates only. It does **not** define what the invariants are.
+`archguard-analyze` owns diffing and status updates only. It does **not** define what the invariants are. The invariant definitions (all 13 bans) are owned by `archguard-discover` and documented in `.knowledge/archguard-methodology.md`.
 
 ### Step 5: Update files
 

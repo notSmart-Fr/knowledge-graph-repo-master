@@ -29,16 +29,18 @@ archguard-discover → archguard-clarify → archguard-plan → archguard-implem
 
 For each invariant ban from discover that is marked "Active: yes":
 - Ban #1 (JSON.parse) → ESLint selector + whitelist
-- Ban #2 (any) → ESLint rule
-- Ban #3 (@ts-ignore) → ESLint rule
+- Ban #2 (any type + as any) → ESLint rule
+- Ban #3 (@ts-ignore / @ts-nocheck) → ESLint rule
 - Ban #4 (console.log) → ESLint selector + whitelist
 - Ban #5 (fetch without signal) → ESLint selector + whitelist (if active)
 - Ban #6 (empty catch) → ESLint selector
 - Ban #7 (process.exit) → ESLint selector + whitelist (if active)
-- Ban #8 (unbounded loops) → ESLint selector (if active)
+- Ban #8 (unbounded loops + setInterval) → ESLint selector (if active)
 - Ban #9 (process.env) → ESLint selector + whitelist (if active)
 - Ban #10 (Date.now) → Only if clarify confirmed option (1). Whitelist from clarify.
 - Ban #11 (floating promises) → ESLint rule
+- Ban #12 (export *) → ESLint selector
+- Ban #13 (mutable module-level state) → ESLint selector
 
 **Then domain + tech context from clarify/discover:**
 
@@ -200,6 +202,18 @@ Output to `.archguard/plan.md`:
 | File | Banned Primitive | Safety Wrapper | FM |
 |------|-----------------|----------------|-----|
 | <path> | <banned API> | <what the wrapper adds> | <FM#> |
+
+## Hygiene Rules
+[Always included alongside invariant bans. Same ESLint config, separate concern.]
+
+| Rule | Value | Justification |
+|------|-------|---------------|
+| complexity | max 8 | McCabe — defect density threshold |
+| max-depth | max 3 | Nesting cognitive load |
+| max-lines-per-function | warn 75 | Lipow — defect density after 100 lines |
+| @typescript-eslint/no-unused-vars | error | Dead code elimination |
+
+If `knip` is in devDependencies, add a `knip` script entry to the plan notes.
 
 ## Gaps
 [Any FM opted-in with zero rules, or explain why it's covered by existing mechanisms]

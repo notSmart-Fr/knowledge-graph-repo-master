@@ -45,21 +45,23 @@ The whitelist file names (e.g., `safe-parse.ts`) are **suggestions**. The skill 
 
 ### Step 2.5: Generate Invariant-Derived Bans
 
-These 11 bans are the axioms. They apply to every project. No user confirmation needed. No dependency check needed — they're universal. Generate them immediately.
+These 13 bans are the axioms. They apply to every project. No user confirmation needed. No dependency check needed — they're universal. Generate them immediately.
 
-| # | Ban | FM | Condition | ESLint Rule/Selector | Whitelist |
+| # | Ban | FM | Condition | ESLint Rule / Selector | Whitelist |
 |---|-----|-----|-----------|----------------------|-----------|
 | 1 | Raw `JSON.parse()` | I.1 / FM1 | Always | `CallExpression[callee.object.name='JSON'][callee.property.name='parse']` | `<core-layer>/safe-parse.ts` |
-| 2 | `any` type | FM4 | Always | `@typescript-eslint/no-explicit-any: error` | N/A |
-| 3 | `@ts-ignore` / `@ts-nocheck` | FM4 | Always | `@typescript-eslint/ban-ts-comment: ['error', {'ts-ignore': 'allow-with-description'}]` | N/A |
-| 4 | `console.log` (and info/warn/debug) | I.3 / FM3 | Always | `CallExpression[callee.object.name='console'][callee.property.name=/^(log|info|warn|debug)$/]` | `<the project's logger file>` |
-| 5 | `fetch()` without `AbortSignal` | I.4 / FM4 | Only if `fetch()` is used | `CallExpression[callee.property.name='fetch']:not([arguments.1.properties[name='signal']])` | `<adapter-layer>/safe-fetch.ts` |
+| 2 | `any` type + `as any` | FM4 | Always | `@typescript-eslint/no-explicit-any: error` | N/A |
+| 3 | `@ts-ignore` / `@ts-nocheck` | FM4 | Always | `@typescript-eslint/ban-ts-comment: ['error', {'ts-ignore': true, 'ts-nocheck': true}]` | N/A |
+| 4 | `console.log` (and info/warn/debug) | I.3 / FM3 | Always | `CallExpression[callee.object.name='console'][callee.property.name=/^(log\|info\|warn\|debug)$/]` | `<the project's logger file>` |
+| 5 | `fetch()` without `AbortSignal` | I.4 / FM4 | If `fetch()` is used | `CallExpression[callee.name='fetch']:not([arguments.1.properties[name='signal']])` | `<adapter-layer>/safe-fetch.ts` |
 | 6 | Empty `catch` blocks | I.4 / FM4 | Always | `CatchClause[body.body.length=0]` | N/A |
 | 7 | `process.exit()` / `Bun.exit()` | I.5 / FM5 | Node.js or Bun only | `CallExpression[callee.object.name='process'][callee.property.name='exit']` | `<core-layer>/shutdown.ts` |
-| 8 | `while(true)` / `for(;;)` | I.4 / FM4 | Only if found | `WhileStatement[test.type='Literal'][test.value=true], ForStatement[init=null][test=null][update=null]` | N/A |
-| 9 | `process.env` outside config | I.1 / FM1 | Node.js only | `MemberExpression[object.object.name='process'][object.property.name='env']` | `<config-layer>/env-schema.ts` |
-| 10 | `Date.now()` / `new Date()` in business logic | I.4 | **Deferred to clarify** | `NewExpression[callee.name='Date'][arguments.length=0], CallExpression[callee.object.name='Date'][callee.property.name='now']` | `<core-layer>/time-service.ts` |
-| 11 | Floating promises (un-awaited) | FM5 / FM4 | Always — every async TS project | `@typescript-eslint/no-floating-promises: error` | N/A |
+| 8 | `while(true)` / `for(;;)` + `setInterval` | I.4/FM4 I.5/FM5 | If found | `WhileStatement[test.value=true]`, `ForStatement[init=null][test=null][update=null]`, `CallExpression[callee.name='setInterval']` | N/A |
+| 9 | `process.env` outside config | I.1 / FM1 | Node.js only | `MemberExpression[object.object.name='process'][object.property.name='env']` (excl. config dir) | `<config-layer>/env-schema.ts` |
+| 10 | `Date.now()` / `new Date()` in business logic | I.4 | **Deferred to clarify** | `NewExpression[callee.name='Date'][arguments.length=0]`, `CallExpression[callee.object.name='Date'][callee.property.name='now']` | `<core-layer>/time-service.ts` |
+| 11 | Floating promises (un-awaited) | FM5 / FM4 | Always | `@typescript-eslint/no-floating-promises: error` | N/A |
+| 12 | `export *` (barrel exports) | FM3 | Always | `ExportAllDeclaration` | N/A |
+| 13 | Mutable module-level state (`let`/`var` at module scope) | FM6 | Always | `VariableDeclaration[kind!='const']:not(:has(ancestor::BlockStatement))` | N/A |
 
 **How to determine whitelist paths:**
 - `<core-layer>` = the innermost domain layer discovered in Step 2 (e.g., `core/`, `domain/`, `src/domain/`)
@@ -68,14 +70,30 @@ These 11 bans are the axioms. They apply to every project. No user confirmation 
 - If the project has no clear layers, default to `src/utils/` or `lib/`
 - The whitelist file name is suggested — adapt to project conventions
 
-**For each ban, also check activation conditions:**
+**For each ban, check activation conditions:**
 - Run `grep fetch(` across the codebase → if matches > 0, ban #5 is active
 - Run `grep 'process.exit\|Bun.exit'` → if matches > 0, ban #7 is active
 - Run `grep 'while\s*(true)\|for\s*(;;)'` → if matches > 0, ban #8 is active
+- Run `grep 'setInterval'` → if matches > 0, ban #8 is active
 - Run `grep 'process.env'` → if matches > 0, ban #9 is active (check if any are outside config files)
 - If runtime is Deno, skip bans #7 and #9 (Deno uses `Deno.exit` and `Deno.env`)
+- Bans #10 is always deferred to `archguard-clarify`
+- Bans #11, #12, #13 are always active
 
-These go into the output as a separate `## Invariant-Derived Bans` section.
+### Step 2.6: Generate Whitelist File Specs
+
+For every ban with a whitelist path (not N/A), produce a whitelist file spec. The stub enforces what the ban requires — timeout + signal + validation.
+
+| Ban # | Banned Primitive | Whitelist File | Safety Wrapper |
+|-------|-----------------|----------------|----------------|
+| 1 | `JSON.parse` | `<core-layer>/safe-parse.ts` | JSON.parse inside Zod.safeParse |
+| 4 | `console.log` | `<logger-file>` | Structured logger with trace IDs |
+| 5 | `fetch()` | `<adapter-layer>/safe-fetch.ts` | Timeout (AbortSignal) + Zod validation |
+| 7 | `process.exit` | `<core-layer>/shutdown.ts` | Graceful SIGTERM/SIGINT handler |
+| 9 | `process.env` | `<config-layer>/env-schema.ts` | Centralized env parsing + validation |
+| 10 | `Date.now()` / `new Date()` | `<core-layer>/time-service.ts` | Injectable time abstraction |
+
+These go into the output as a `## Whitelist Files` section.
 
 ### Step 3: Generate the 4 Maps
 
@@ -258,16 +276,30 @@ Write TWO outputs:
 | Ban | FM | Active? | Selector | Whitelist |
 |-----|-----|---------|----------|-----------|
 | 1. Raw JSON.parse | I.1 / FM1 | yes | `CallExpression[...]` | `<path>` |
-| 2. any type | FM4 | yes | `@typescript-eslint/no-explicit-any` | N/A |
-| 3. @ts-ignore | FM4 | yes | `@typescript-eslint/ban-ts-comment` | N/A |
+| 2. any type + as any | FM4 | yes | `@typescript-eslint/no-explicit-any` | N/A |
+| 3. @ts-ignore / @ts-nocheck | FM4 | yes | `@typescript-eslint/ban-ts-comment` | N/A |
 | 4. console.log | I.3 / FM3 | yes | `CallExpression[...]` | `<logger-file>` |
 | 5. fetch() without signal | I.4 / FM4 | yes/no | `CallExpression[...]` | `<safe-fetch>` |
 | 6. Empty catch | I.4 / FM4 | yes | `CatchClause[...]` | N/A |
 | 7. process.exit | I.5 / FM5 | yes/no | `CallExpression[...]` | `<shutdown-handler>` |
-| 8. Unbounded loops | I.4 / FM4 | yes/no | `WhileStatement[...]` | N/A |
+| 8. Unbounded loops + setInterval | I.4/FM4 I.5/FM5 | yes/no | `WhileStatement[...]` | N/A |
 | 9. process.env (non-config) | I.1 / FM1 | yes/no | `MemberExpression[...]` | `<env-schema>` |
 | 10. Date.now() / new Date() | I.4 | deferred | N/A — promoted to clarify | N/A |
 | 11. Floating promises | FM5 / FM4 | yes | `@typescript-eslint/no-floating-promises` | N/A |
+| 12. export * (barrel exports) | FM3 | yes | `ExportAllDeclaration` | N/A |
+| 13. Mutable module-level state | FM6 | yes | `VariableDeclaration[...]` | N/A |
+
+## Whitelist Files
+[For each ban with a whitelist path]
+
+| Primitive | File | Safety Wrapper |
+|-----------|------|----------------|
+| JSON.parse | <path> | JSON.parse inside Zod.safeParse |
+| console.log | <path> | Structured logger with trace IDs |
+| fetch() | <path> | Timeout (AbortSignal) + Zod validation |
+| process.exit | <path> | Graceful SIGTERM/SIGINT handler |
+| process.env | <path> | Centralized env parsing + validation |
+| Date.now() / new Date() | <path> | Injectable time abstraction |
 
 ## Map A: Trust Boundaries
 - Count: N matches across M files
